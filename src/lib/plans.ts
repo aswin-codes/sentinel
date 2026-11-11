@@ -365,3 +365,146 @@ export async function getFailedCases(planId: number, runId?: number) {
 }
 
 export class NotFoundError extends Error {}
+
+// ---------- Extra helpers for REST routes ----------
+
+export type PlanListItem = {
+  id: number;
+  projectId: number;
+  title: string;
+  description: string | null;
+  gitBranch: string | null;
+  commitHash: string | null;
+  status: string;
+  updatedAt: string;
+  latestRunId: number | null;
+  counts: { total: number; pass: number; fail: number; notRun: number };
+};
+
+/** Plans for a project (updatedAt desc) with counts for each plan's latest run. */
+export async function listPlans(projectId: number): Promise<PlanListItem[]> {
+  const plans = await db
+    .select()
+    .from(testPlans)
+    .where(eq(testPlans.projectId, projectId))
+    .orderBy(desc(testPlans.updatedAt), desc(testPlans.id));
+  if (!plans.length) return [];
+  const planIds = plans.map((p) => p.id);
+
+  const runs = await db
+    .select({ id: testRuns.id, planId: testRuns.planId })
+    .from(testRuns)
+    .where(inArray(testRuns.planId, planIds))
+    .orderBy(desc(testRuns.createdAt), desc(testRuns.id));
+  const latestRun = new Map<number, number>();
+  for (const r of runs) if (!latestRun.has(r.planId)) latestRun.set(r.planId, r.id);
+
+  const caseRows = await db
+    .select({ planId: testSections.planId, caseId: testCases.id })
+    .from(testCases)
+    .innerJoin(testSections, eq(testSections.id, testCases.sectionId))
+    .where(inArray(testSections.planId, planIds));
+  const casesByPlan = new Map<number, Set<number>>();
+  for (const c of caseRows) {
+    if (!casesByPlan.has(c.planId)) casesByPlan.set(c.planId, new Set());
+    casesByPlan.get(c.planId)!.add(c.caseId);
+  }
+
+  const runIds = [...latestRun.values()];
+  const results = runIds.length
+    ? await db
+        .select({ runId: testResults.runId, caseId: testResults.caseId, status: testResults.status })
+        .from(testResults)
+        .where(inArray(testResults.runId, runIds))
+    : [];
+  const resultsByRun = new Map<number, typeof results>();
+  for (const r of results) {
+    if (!resultsByRun.has(r.runId)) resultsByRun.set(r.runId, []);
+    resultsByRun.get(r.runId)!.push(r);
+  }
+
+  return plans.map((p) => {
+    const runId = latestRun.get(p.id) ?? null;
+    const caseIds = casesByPlan.get(p.id) ?? new Set<number>();
+    let pass = 0;
+    let fail = 0;
+    for (const r of runId ? (resultsByRun.get(runId) ?? []) : []) {
+      if (!caseIds.has(r.caseId)) continue;
+      if (r.status === "pass") pass++;
+      else if (r.status === "fail") fail++;
+    }
+    const total = caseIds.size;
+    return {
+      id: p.id,
+      projectId: p.projectId,
+      title: p.title,
+      description: p.description,
+      gitBranch: p.gitBranch,
+      commitHash: p.commitHash,
+      status: p.status,
+      updatedAt: iso(p.updatedAt)!,
+      latestRunId: runId,
+      counts: { total, pass, fail, notRun: total - pass - fail },
+    };
+  });
+}
+
+export const planPatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    description: z.string().nullish(),
+    status: z.enum(["draft", "active", "archived"]).optional(),
+    gitBranch: z.string().nullish(),
+    commitHash: z.string().nullish(),
+  })
+  .strict();
+
+/** Partial plan update; bumps updatedAt. Throws NotFoundError if missing. */
+export async function updatePlan(planId: number, patch: z.infer<typeof planPatchSchema>) {
+  const set: Partial<typeof testPlans.$inferInsert> = { updatedAt: new Date() };
+  if (patch.title !== undefined) set.title = patch.title;
+  if (patch.description !== undefined) set.description = patch.description;
+  if (patch.status !== undefined) set.status = patch.status;
+  if (patch.gitBranch !== undefined) set.gitBranch = patch.gitBranch;
+  if (patch.commitHash !== undefined) set.commitHash = patch.commitHash;
+  const [row] = await db
+    .update(testPlans)
+    .set(set)
+    .where(eq(testPlans.id, planId))
+    .returning({ id: testPlans.id });
+  if (!row) throw new NotFoundError(`Plan ${planId} not found`);
+}
+
+/** New run for a plan; default name "Run N" (N = existing run count + 1). */
+export async function createRun(planId: number, name?: string): Promise<RunSummary> {
+  const [plan] = await db.select({ id: testPlans.id }).from(testPlans).where(eq(testPlans.id, planId));
+  if (!plan) throw new NotFoundError(`Plan ${planId} not found`);
+  const existing = await db.select({ id: testRuns.id }).from(testRuns).where(eq(testRuns.planId, planId));
+  const [run] = await db
+    .insert(testRuns)
+    .values({ planId, name: name?.trim() || `Run ${existing.length + 1}` })
+    .returning();
+  return { id: run.id, planId: run.planId, name: run.name, createdAt: iso(run.createdAt)! };
+}
+
+/** Clear all results for a run (missing row == not_run). */
+export async function resetRun(runId: number): Promise<void> {
+  const [run] = await db.select({ id: testRuns.id }).from(testRuns).where(eq(testRuns.id, runId));
+  if (!run) throw new NotFoundError(`Run ${runId} not found`);
+  await db.delete(testResults).where(eq(testResults.runId, runId));
+}
+
+/** Throws NotFoundError / CaseNotInRunError unless caseId belongs to the run's plan. */
+export async function assertCaseInRun(runId: number, caseId: number): Promise<void> {
+  const [run] = await db.select({ planId: testRuns.planId }).from(testRuns).where(eq(testRuns.id, runId));
+  if (!run) throw new NotFoundError(`Run ${runId} not found`);
+  const [row] = await db
+    .select({ planId: testSections.planId })
+    .from(testCases)
+    .innerJoin(testSections, eq(testSections.id, testCases.sectionId))
+    .where(eq(testCases.id, caseId));
+  if (!row || row.planId !== run.planId)
+    throw new BadRequestError(`Case ${caseId} does not belong to run ${runId}'s plan`);
+}
+
+export class BadRequestError extends Error {}

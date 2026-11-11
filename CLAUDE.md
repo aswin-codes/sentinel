@@ -39,7 +39,7 @@ mcp-server/index.ts   Stdio MCP server; imports ../src/lib/* and ../src/db (rela
 | GET | `/api/projects` | – | `Project[]` |
 | POST | `/api/projects` | `{name, description?, repoPath?}` | `Project` (201) |
 | GET | `/api/projects/[id]/git` | – | `GitInfo` |
-| GET | `/api/plans?projectId=` | – | `PlanListItem[]` `{id,projectId,title,description,gitBranch,commitHash,status,updatedAt,counts}` (counts for latest run) |
+| GET | `/api/plans?projectId=` | – | `PlanListItem[]` `{id,projectId,title,description,gitBranch,commitHash,status,updatedAt,latestRunId,counts}` (counts for latest run) |
 | POST | `/api/plans` | `PlanInput` (see lib/plans.ts) | `PlanFull` (201 created / 200 updated) |
 | GET | `/api/plans/[id]?runId=` | – | `PlanFull` |
 | PATCH | `/api/plans/[id]` | `{title?, description?, status?, gitBranch?, commitHash?}` | `PlanFull` |
