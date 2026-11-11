@@ -1,16 +1,14 @@
-import { eq } from "drizzle-orm";
-import { db } from "@/db";
-import { projects } from "@/db/schema";
+import { assertProjectOwner } from "@/lib/auth";
 import { getGitInfo } from "@/lib/git";
-import { handle, ok, parseId, HttpError } from "@/lib/api";
+import { requireRequestUser } from "@/lib/session";
+import { handle, ok, parseId } from "@/lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const GET = handle(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
-  const id = parseId((await params).id);
-  const [project] = await db.select().from(projects).where(eq(projects.id, id));
-  if (!project) throw new HttpError(404, `Project ${id} not found`);
+export const GET = handle(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const user = await requireRequestUser(req);
+  const project = await assertProjectOwner(user.id, parseId((await params).id));
   // 200 even when ok:false so the UI can show the reason.
   return ok(await getGitInfo(project.repoPath));
 });

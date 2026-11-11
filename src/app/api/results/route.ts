@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { assertRunOwner } from "@/lib/auth";
 import { assertCaseInRun, setResult } from "@/lib/plans";
+import { requireRequestUser } from "@/lib/session";
 import { handle, ok, readJson } from "@/lib/api";
 
 export const runtime = "nodejs";
@@ -17,7 +19,9 @@ const resultInputSchema = z
   });
 
 export const PATCH = handle(async (req: Request) => {
+  const user = await requireRequestUser(req);
   const input = resultInputSchema.parse(await readJson(req));
+  await assertRunOwner(user.id, input.runId);
   await assertCaseInRun(input.runId, input.caseId);
   return ok(await setResult(input));
 });

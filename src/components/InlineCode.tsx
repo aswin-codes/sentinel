@@ -23,7 +23,7 @@ export function RichText({ text }: { text: string }) {
 
 export function InlineCode({ children }: { children: React.ReactNode }) {
   return (
-    <code className="rounded-[4px] border border-line bg-surface-2 px-[5px] py-px font-mono text-[0.86em] text-fg/90 [overflow-wrap:anywhere]">
+    <code className="rounded-[4px] border border-line bg-surface px-[5px] py-px font-mono text-[0.86em] [overflow-wrap:anywhere]">
       {children}
     </code>
   );

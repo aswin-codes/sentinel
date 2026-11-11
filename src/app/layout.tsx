@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "QA Hub",
+  title: { default: "QA Hub", template: "%s · QA Hub" },
   description: "AI agents write the QA test plans; you run them as Pass/Fail checklists.",
 };
 
@@ -23,8 +23,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${geistSans.variable} ${geistMono.variable} bg-canvas text-fg font-sans antialiased`}>
+    <html lang="en">
+      <body className={`${geistSans.variable} ${geistMono.variable} bg-bg font-sans text-fg antialiased`}>
         {children}
       </body>
     </html>

@@ -33,21 +33,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {children}
       <div
         aria-live="polite"
-        className="pointer-events-none fixed bottom-4 left-1/2 z-[70] flex w-[min(420px,calc(100vw-32px))] -translate-x-1/2 flex-col gap-2"
+        className="pointer-events-none fixed bottom-4 left-1/2 z-[70] flex w-[min(400px,calc(100vw-32px))] -translate-x-1/2 flex-col gap-2"
       >
         {items.map((t) => (
           <div
             key={t.id}
             role="status"
-            className={`pointer-events-auto flex items-start gap-2.5 rounded-[10px] border bg-surface px-3.5 py-2.5 text-[13px] shadow-[0_8px_30px_rgba(0,0,0,0.5)] ${
-              t.tone === "error" ? "border-fail/40" : "border-line"
-            }`}
+            className="pointer-events-auto flex items-start gap-2.5 rounded-[8px] border border-line bg-bg px-3.5 py-2.5 text-[13px]"
           >
-            <span
-              aria-hidden
-              className={`mt-[5px] size-1.5 shrink-0 rounded-full ${t.tone === "error" ? "bg-fail" : "bg-accent"}`}
-            />
-            <span className="min-w-0 flex-1 text-fg/90">{t.message}</span>
+            {t.tone === "error" && <span aria-hidden className="mt-[7px] size-1.5 shrink-0 rounded-full bg-fail" />}
+            <span className="min-w-0 flex-1">{t.message}</span>
             <button
               type="button"
               onClick={() => dismiss(t.id)}

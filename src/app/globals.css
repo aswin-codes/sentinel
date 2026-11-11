@@ -1,52 +1,71 @@
 @import "tailwindcss";
 
-/* QA Hub — dark developer UI tokens (dark only). */
-@theme {
-  --color-canvas: #0a0a0c;
-  --color-surface: #121215;
-  --color-surface-2: #18181c;
-  --color-line: #222228;
-  --color-line-strong: #2e2e36;
-  --color-fg: #ededef;
-  --color-muted: #8a8a93;
-  --color-accent: #f59e0b;
-  --color-pass: #10b981;
-  --color-fail: #ef4444;
+:root {
+  --bg: #ffffff;
+  --surface: #fafafa;
+  --line: #eaeaea;
+  --fg: #0a0a0a;
+  --muted: #6b6b6b;
+  --subtle: #a3a3a3;
+  --pass: #059669;
+  --fail: #e11d48;
+  color-scheme: light;
+}
 
-  --radius-card: 10px;
-  --radius-btn: 6px;
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111111;
+    --line: #222222;
+    --fg: #ededed;
+    --muted: #8f8f8f;
+    --subtle: #5c5c5c;
+    --pass: #10b981;
+    --fail: #f43f5e;
+    color-scheme: dark;
+  }
 }
 
 @theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-pass: var(--pass);
+  --color-fail: var(--fail);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, "JetBrains Mono", monospace;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
 }
 
 html {
-  color-scheme: dark;
-  background: var(--color-canvas);
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--color-canvas);
-  color: var(--color-fg);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-accent) 35%, transparent);
-  color: var(--color-fg);
+  background: color-mix(in oklab, var(--fg) 14%, transparent);
 }
 
-/* Accent focus ring everywhere keyboard focus lands. */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid color-mix(in oklab, var(--fg) 30%, transparent);
   outline-offset: 2px;
 }
 
-/* Quiet scrollbars */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #2a2a31 transparent;
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+
+button:not(:disabled),
+[role="button"]:not(:disabled) {
+  cursor: pointer;
 }

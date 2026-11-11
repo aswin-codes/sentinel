@@ -1,9 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
+import { api, errMsg } from "./api";
 import { CopyButton } from "./CopyButton";
+import { InlineCode } from "./InlineCode";
 import { Modal } from "./Modal";
-import { monoLabel } from "./ui";
+import type { CreatedToken } from "./types";
+import { btnSecondary, smallLabel } from "./ui";
 
 type TabId = "claude" | "cursor" | "antigravity";
 
@@ -13,14 +17,19 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "antigravity", label: "Antigravity" },
 ];
 
+const PLACEHOLDER = "qah_YOUR_TOKEN";
+
+export const examplePrompt = (projectName: string) =>
+  `Inspect my recent changes in ${projectName} and create a QA test plan for them in QA Hub.`;
+
 function CodeBlock({ code, label }: { code: string; label: string }) {
   return (
-    <div className="overflow-hidden rounded-[8px] border border-line bg-surface-2">
-      <div className="flex items-center justify-between border-b border-line px-3 py-1.5">
-        <span className={monoLabel}>{label}</span>
+    <div className="overflow-hidden rounded-[8px] border border-line">
+      <div className="flex items-center justify-between border-b border-line bg-surface px-3 py-1.5">
+        <span className="font-mono text-[11.5px] text-muted">{label}</span>
         <CopyButton text={code} className="h-6 px-2" />
       </div>
-      <pre className="overflow-x-auto px-3 py-2.5 font-mono text-[12px] leading-relaxed text-fg/90">
+      <pre className="overflow-x-auto px-3 py-2.5 font-mono text-[12px] leading-relaxed">
         <code>{code}</code>
       </pre>
     </div>
@@ -36,95 +45,136 @@ export function ConnectAgentModal({
   open: boolean;
   onClose: () => void;
   appDir: string;
-  projectName?: string;
+  projectName: string;
 }) {
   const [tab, setTab] = useState<TabId>("claude");
+  const [token, setToken] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  const tok = token ?? PLACEHOLDER;
   const tsx = `${appDir}/node_modules/tsx/dist/cli.mjs`;
   const entry = `${appDir}/mcp-server/index.ts`;
   const config = JSON.stringify(
-    { mcpServers: { "qa-hub": { command: "node", args: [tsx, entry] } } },
+    { mcpServers: { "qa-hub": { command: "node", args: [tsx, entry], env: { QA_HUB_TOKEN: tok } } } },
     null,
     2,
   );
-  const cli = `claude mcp add qa-hub -- node ${tsx} ${entry}`;
-  const prompt = `Inspect my recent changes in ${projectName ?? "<project>"} and create a QA test plan for them in QA Hub.`;
+  const cli = `claude mcp add qa-hub -e QA_HUB_TOKEN=${tok} -- node ${tsx} ${entry}`;
+  const prompt = examplePrompt(projectName);
+
+  const generate = async () => {
+    setBusy(true);
+    setError(null);
+    const agent = TABS.find((t) => t.id === tab)?.label ?? "Agent";
+    try {
+      const t = await api<CreatedToken>("/api/tokens", { method: "POST", body: { name: `${agent} – ${projectName}` } });
+      setToken(t.token);
+    } catch (e) {
+      setError(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="Connect an agent"
-      description="QA Hub ships an MCP server. Add it to your coding agent so it can create plans and read failures."
+      description="Add QA Hub's MCP server to your coding agent so it can write test plans and read failures."
       width={640}
     >
-      <div role="tablist" aria-label="Agent" className="mb-4 inline-flex rounded-[6px] border border-line bg-surface-2 p-0.5">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
-            className={`h-7 rounded-[5px] px-3 text-[12.5px] font-medium transition-colors ${
-              tab === t.id ? "bg-surface text-fg shadow-[inset_0_0_0_1px_var(--color-line)]" : "text-muted hover:text-fg"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <div className="space-y-5 text-[13px] text-muted">
+        <div>
+          <div className={`${smallLabel} mb-2`}>1 · API token</div>
+          {token ? (
+            <p>
+              Token generated and filled in below. <span className="text-fg">It&apos;s only shown once</span> — copy
+              the config now. Manage tokens in{" "}
+              <Link href="/settings" className="text-fg underline underline-offset-4" onClick={onClose}>
+                Settings → API tokens
+              </Link>
+              .
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" onClick={generate} disabled={busy} className={btnSecondary}>
+                {busy ? "Generating…" : "Generate token"}
+              </button>
+              <span>
+                Or use an existing one from{" "}
+                <Link href="/settings" className="text-fg underline underline-offset-4" onClick={onClose}>
+                  Settings
+                </Link>{" "}
+                in place of <InlineCode>{PLACEHOLDER}</InlineCode>.
+              </span>
+            </div>
+          )}
+          {error && <p className="mt-2 text-fail">{error}</p>}
+        </div>
 
-      <div role="tabpanel" className="space-y-3 text-[13px] text-muted">
-        {tab === "claude" && (
-          <>
-            <p>Run this in your project&apos;s terminal:</p>
-            <CodeBlock label="Terminal" code={cli} />
-            <p>
-              Or add it to <Code>.mcp.json</Code> (project-scoped) or <Code>~/.claude.json</Code> (all projects):
-            </p>
-            <CodeBlock label=".mcp.json" code={config} />
-          </>
-        )}
-        {tab === "cursor" && (
-          <>
-            <p>
-              Add this to <Code>.cursor/mcp.json</Code> in your project (or <Code>~/.cursor/mcp.json</Code> globally),
-              then enable <span className="text-fg/90">qa-hub</span> under Settings → MCP.
-            </p>
-            <CodeBlock label=".cursor/mcp.json" code={config} />
-          </>
-        )}
-        {tab === "antigravity" && (
-          <>
-            <p>
-              Open the agent panel menu → MCP Servers → Manage → View raw config, and merge this into{" "}
-              <Code>mcp_config.json</Code>:
-            </p>
-            <CodeBlock label="mcp_config.json" code={config} />
-          </>
-        )}
-        <p className="text-[12px]">
-          Keep QA Hub&apos;s database running; the MCP server talks to it directly — this web app doesn&apos;t need to be
-          open.
-        </p>
-      </div>
+        <div>
+          <div className={`${smallLabel} mb-2`}>2 · Add the server</div>
+          <div role="tablist" aria-label="Agent" className="mb-3 flex gap-4 border-b border-line">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                onClick={() => setTab(t.id)}
+                className={`-mb-px border-b px-0.5 pb-2 text-[13px] transition-colors ${
+                  tab === t.id ? "border-fg text-fg" : "border-transparent text-muted hover:text-fg"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
 
-      <div className="mt-5 border-t border-line pt-4">
-        <div className={`${monoLabel} mb-2`}>Try asking your agent</div>
-        <div className="flex items-start gap-3 rounded-[8px] border border-line bg-surface-2 px-3 py-2.5">
-          <p className="min-w-0 flex-1 text-[13px] text-fg/90">&ldquo;{prompt}&rdquo;</p>
-          <CopyButton text={prompt} iconOnly label="Copy example prompt" className="h-6 shrink-0 px-1.5" />
+          <div role="tabpanel" className="space-y-3">
+            {tab === "claude" && (
+              <>
+                <p>Run this in your project&apos;s terminal:</p>
+                <CodeBlock label="Terminal" code={cli} />
+                <p>
+                  Or add it to <InlineCode>.mcp.json</InlineCode> (project) or <InlineCode>~/.claude.json</InlineCode>{" "}
+                  (all projects):
+                </p>
+                <CodeBlock label=".mcp.json" code={config} />
+              </>
+            )}
+            {tab === "cursor" && (
+              <>
+                <p>
+                  Add this to <InlineCode>.cursor/mcp.json</InlineCode> in your project (or{" "}
+                  <InlineCode>~/.cursor/mcp.json</InlineCode>), then enable <span className="text-fg">qa-hub</span> in
+                  Settings → MCP.
+                </p>
+                <CodeBlock label=".cursor/mcp.json" code={config} />
+              </>
+            )}
+            {tab === "antigravity" && (
+              <>
+                <p>
+                  Agent panel menu → MCP Servers → Manage → View raw config, then merge this into{" "}
+                  <InlineCode>mcp_config.json</InlineCode>:
+                </p>
+                <CodeBlock label="mcp_config.json" code={config} />
+              </>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div className={`${smallLabel} mb-2`}>3 · Ask your agent</div>
+          <div className="flex items-start gap-3 rounded-[8px] border border-line px-3 py-2.5">
+            <p className="min-w-0 flex-1 text-fg">{prompt}</p>
+            <CopyButton text={prompt} iconOnly label="Copy example prompt" className="h-6 shrink-0 px-1.5" />
+          </div>
         </div>
       </div>
     </Modal>
-  );
-}
-
-function Code({ children }: { children: React.ReactNode }) {
-  return (
-    <code className="rounded-[4px] border border-line bg-surface-2 px-1 py-px font-mono text-[12px] text-fg/90">
-      {children}
-    </code>
   );
 }

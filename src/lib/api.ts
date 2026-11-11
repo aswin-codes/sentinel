@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { BadRequestError, NotFoundError } from "./plans";
+import { ConflictError, UnauthorizedError } from "./auth";
 
 /** Error thrown inside handlers to produce a specific status. */
 export class HttpError extends Error {
@@ -44,7 +45,7 @@ function pgErrorCode(e: unknown): string | undefined {
   return typeof code === "string" ? code : undefined;
 }
 
-/** Wrap a route handler: ZodError→400, NotFoundError→404, HttpError→its status, unique violation→409, else 500. */
+/** Wrap a route handler: ZodError→400, UnauthorizedError→401, ConflictError→409, NotFoundError→404, HttpError→its status, unique violation→409, else 500. */
 export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response>) {
   return async (...args: A): Promise<Response> => {
     try {
@@ -52,6 +53,8 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response
     } catch (e) {
       if (e instanceof ZodError) return fail(400, "Invalid input", e.issues);
       if (e instanceof HttpError) return fail(e.status, e.message, e.details);
+      if (e instanceof UnauthorizedError) return fail(401, e.message);
+      if (e instanceof ConflictError) return fail(409, e.message);
       if (e instanceof NotFoundError) return fail(404, e.message);
       if (e instanceof BadRequestError) return fail(400, e.message);
       if (pgErrorCode(e) === "23505")

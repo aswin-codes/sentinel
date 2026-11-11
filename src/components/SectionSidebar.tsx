@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { SectionFull } from "./types";
-import { monoLabel } from "./ui";
+import { smallLabel } from "./ui";
 
 export const sectionDomId = (id: number) => `section-${id}`;
 
@@ -28,8 +28,8 @@ function useActiveSection(ids: number[]) {
         const first = sectionIds.find((id) => visible.has(id));
         if (first !== undefined) setActive(first);
       },
-      // Band just below the sticky bars, upper ~40% of the viewport.
-      { rootMargin: "-130px 0px -55% 0px", threshold: 0 },
+      // Band just below the sticky nav + toolbar, upper ~40% of the viewport.
+      { rootMargin: "-120px 0px -55% 0px", threshold: 0 },
     );
     els.forEach((el) => io.observe(el));
     return () => io.disconnect();
@@ -50,14 +50,15 @@ export function SectionSidebar({ sections }: { sections: SectionFull[] }) {
   };
 
   return (
-    <nav aria-label="Sections" className="sticky top-[132px] hidden max-h-[calc(100vh-150px)] w-[220px] shrink-0 self-start overflow-y-auto min-[860px]:block">
-      <div className={`${monoLabel} mb-2.5 px-2.5`}>Sections</div>
+    <nav
+      aria-label="Sections"
+      className="sticky top-[132px] hidden max-h-[calc(100vh-150px)] w-[200px] shrink-0 self-start overflow-y-auto lg:block"
+    >
+      <div className={`${smallLabel} mb-2`}>Sections</div>
       <ul className="space-y-px">
         {sections.map((s) => {
           const total = s.cases.length;
-          const pass = s.cases.filter((c) => c.result.status === "pass").length;
-          const fail = s.cases.filter((c) => c.result.status === "fail").length;
-          const done = pass + fail;
+          const done = s.cases.filter((c) => c.result.status !== "not_run").length;
           const isActive = active === s.id;
           return (
             <li key={s.id}>
@@ -65,17 +66,12 @@ export function SectionSidebar({ sections }: { sections: SectionFull[] }) {
                 type="button"
                 onClick={() => jump(s.id)}
                 aria-current={isActive ? "location" : undefined}
-                className={`group flex w-full items-center gap-2.5 rounded-[6px] px-2.5 py-1.5 text-left text-[13px] transition-colors ${
-                  isActive ? "bg-surface text-fg shadow-[inset_0_0_0_1px_var(--color-line)]" : "text-muted hover:bg-surface/60 hover:text-fg"
+                className={`flex w-full items-center gap-2 rounded-[6px] py-1 text-left text-[13px] transition-colors ${
+                  isActive ? "text-fg" : "text-muted hover:text-fg"
                 }`}
               >
-                <span className="w-3.5 shrink-0 font-mono text-[12px] font-semibold text-accent">{s.code}</span>
                 <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                <span
-                  className={`shrink-0 font-mono text-[11px] tabular-nums ${
-                    fail ? "text-fail" : total > 0 && done === total ? "text-pass" : "text-muted"
-                  }`}
-                >
+                <span className="shrink-0 text-[12px] tabular-nums text-subtle">
                   {done}/{total}
                 </span>
               </button>

@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { assertPlanOwner } from "@/lib/auth";
 import { createRun } from "@/lib/plans";
+import { requireRequestUser } from "@/lib/session";
 import { handle, ok, readJson } from "@/lib/api";
 
 export const runtime = "nodejs";
@@ -11,6 +13,8 @@ const runInputSchema = z.object({
 });
 
 export const POST = handle(async (req: Request) => {
+  const user = await requireRequestUser(req);
   const input = runInputSchema.parse(await readJson(req));
+  await assertPlanOwner(user.id, input.planId);
   return ok(await createRun(input.planId, input.name ?? undefined), 201);
 });

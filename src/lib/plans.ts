@@ -2,7 +2,8 @@
  * Shared plan service — used by API route handlers AND the MCP server.
  * Keep imports relative (no "@/") so tsx can run mcp-server without path aliases.
  */
-import { and, asc, desc, eq, inArray, notInArray } from "drizzle-orm";
+import path from "node:path";
+import { and, asc, count, desc, eq, inArray, max, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -229,7 +230,7 @@ export async function upsertPlan(raw: PlanInput): Promise<{ planId: number; crea
             .where(and(eq(testPlans.projectId, input.projectId), eq(testPlans.title, input.planTitle)))
         )[0];
     if (existing && existing.projectId !== input.projectId)
-      throw new Error(`Plan ${existing.id} belongs to a different project`);
+      throw new BadRequestError(`Plan ${existing.id} belongs to a different project`);
 
     const fields = {
       title: input.planTitle,
@@ -508,3 +509,112 @@ export async function assertCaseInRun(runId: number, caseId: number): Promise<vo
 }
 
 export class BadRequestError extends Error {}
+
+// ---------- Projects ----------
+
+const repoPathSchema = z
+  .string()
+  .trim()
+  .nullish()
+  .transform((v) => (v ? v : null))
+  .refine((v) => v === null || path.isAbsolute(v), { message: "repoPath must be an absolute path" });
+
+export const projectInputSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  description: z.string().nullish(),
+  repoPath: repoPathSchema,
+});
+
+export const projectPatchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200).optional(),
+    description: z.string().nullish(),
+    repoPath: repoPathSchema.optional(),
+  })
+  .strict();
+
+export type Project = typeof projects.$inferSelect;
+
+export type ProjectListItem = {
+  id: number;
+  name: string;
+  description: string | null;
+  repoPath: string | null;
+  createdAt: string;
+  planCount: number;
+  /** Latest plan update, or project createdAt when it has no plans. */
+  updatedAt: string;
+};
+
+/** The user's projects with plan counts, most recently active first. */
+export async function listProjects(userId: number): Promise<ProjectListItem[]> {
+  const rows = await db
+    .select({
+      project: projects,
+      planCount: count(testPlans.id),
+      lastPlanUpdate: max(testPlans.updatedAt),
+    })
+    .from(projects)
+    .leftJoin(testPlans, eq(testPlans.projectId, projects.id))
+    .where(eq(projects.userId, userId))
+    .groupBy(projects.id);
+  return rows
+    .map(({ project: p, planCount, lastPlanUpdate }) => {
+      const created = new Date(p.createdAt);
+      const last = lastPlanUpdate ? new Date(lastPlanUpdate) : null;
+      const updated = last && last > created ? last : created;
+      return {
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        repoPath: p.repoPath,
+        createdAt: created.toISOString(),
+        planCount: Number(planCount),
+        updatedAt: updated.toISOString(),
+      };
+    })
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id);
+}
+
+export async function createProject(
+  userId: number,
+  raw: z.input<typeof projectInputSchema>,
+): Promise<Project> {
+  const input = projectInputSchema.parse(raw);
+  const [row] = await db
+    .insert(projects)
+    .values({ userId, name: input.name, description: input.description ?? null, repoPath: input.repoPath })
+    .returning();
+  return row;
+}
+
+/** Partial project update. Caller must have checked ownership. */
+export async function updateProject(
+  projectId: number,
+  patch: z.infer<typeof projectPatchSchema>,
+): Promise<Project> {
+  const set: Partial<typeof projects.$inferInsert> = {};
+  if (patch.name !== undefined) set.name = patch.name;
+  if (patch.description !== undefined) set.description = patch.description;
+  if (patch.repoPath !== undefined) set.repoPath = patch.repoPath;
+  if (!Object.keys(set).length) {
+    const [row] = await db.select().from(projects).where(eq(projects.id, projectId));
+    if (!row) throw new NotFoundError(`Project ${projectId} not found`);
+    return row;
+  }
+  const [row] = await db.update(projects).set(set).where(eq(projects.id, projectId)).returning();
+  if (!row) throw new NotFoundError(`Project ${projectId} not found`);
+  return row;
+}
+
+/** Delete a project (cascades to plans, runs, results). Caller must have checked ownership. */
+export async function deleteProject(projectId: number): Promise<void> {
+  const [row] = await db.delete(projects).where(eq(projects.id, projectId)).returning({ id: projects.id });
+  if (!row) throw new NotFoundError(`Project ${projectId} not found`);
+}
+
+/** Delete a plan (cascades). Caller must have checked ownership. */
+export async function deletePlan(planId: number): Promise<void> {
+  const [row] = await db.delete(testPlans).where(eq(testPlans.id, planId)).returning({ id: testPlans.id });
+  if (!row) throw new NotFoundError(`Plan ${planId} not found`);
+}

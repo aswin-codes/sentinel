@@ -1,14 +1,22 @@
 import type { CaseWithResult } from "@/lib/plans";
 
-export type { PlanFull, SectionFull, CaseWithResult, RunSummary } from "@/lib/plans";
+export type {
+  PlanFull,
+  SectionFull,
+  CaseWithResult,
+  RunSummary,
+  PlanListItem,
+  ProjectListItem,
+} from "@/lib/plans";
 export type { GitInfo } from "@/lib/git";
+export type { PublicUser } from "@/lib/auth";
 
 export type ResultStatus = CaseWithResult["result"]["status"];
 
 export type Counts = { total: number; pass: number; fail: number; notRun: number };
 
-/** Shape of GET /api/projects items (JSON-serialized `projects` row). */
-export type Project = {
+/** JSON-serialized `projects` row as returned by the REST API. */
+export type ProjectDTO = {
   id: number;
   name: string;
   description: string | null;
@@ -16,17 +24,16 @@ export type Project = {
   createdAt: string;
 };
 
-/** Shape of GET /api/plans?projectId= items. */
-export type PlanListItem = {
+/** GET /api/tokens item. */
+export type ApiTokenInfo = {
   id: number;
-  projectId: number;
-  title: string;
-  description: string | null;
-  gitBranch: string | null;
-  commitHash: string | null;
-  status: string;
-  updatedAt: string;
-  counts: Counts;
+  name: string;
+  prefix: string;
+  lastUsedAt: string | null;
+  createdAt: string;
 };
+
+/** POST /api/tokens response (token shown once). */
+export type CreatedToken = { id: number; name: string; prefix: string; createdAt: string; token: string };
 
 export type Filter = "all" | "not_run" | "fail";

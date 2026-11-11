@@ -52,9 +52,7 @@ export function CopyButton({
       type="button"
       onClick={onClick}
       aria-label={iconOnly ? (copied ? copiedLabel : label) : undefined}
-      className={`inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-line bg-surface px-2.5 text-[12px] font-medium transition-colors hover:border-line-strong hover:bg-surface-2 ${
-        copied ? "text-pass" : "text-muted hover:text-fg"
-      } ${className}`}
+      className={`inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-line bg-bg px-2.5 text-[12px] font-medium text-muted transition-colors hover:bg-surface hover:text-fg ${className}`}
     >
       <Icon className="size-3.5" aria-hidden />
       {!iconOnly && <span>{copied ? copiedLabel : label}</span>}

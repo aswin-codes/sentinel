@@ -22,11 +22,33 @@ async function main() {
   const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { z } = await import("zod");
-  const { asc, desc, eq } = await import("drizzle-orm");
+  const { desc, inArray } = await import("drizzle-orm");
   const { db, pool } = await import("../src/db");
-  const { projects, testPlans } = await import("../src/db/schema");
-  const { planInputSchema, upsertPlan, getPlanFull, getFailedCases } = await import("../src/lib/plans");
+  const { testPlans } = await import("../src/db/schema");
+  const { planInputSchema, upsertPlan, getPlanFull, getFailedCases, listProjects, createProject, projectInputSchema } =
+    await import("../src/lib/plans");
   const { getGitInfo, getGitDiff } = await import("../src/lib/git");
+  const { getUserByApiToken, assertProjectOwner, assertPlanOwner } = await import("../src/lib/auth");
+
+  // 2) Resolve the user from QA_HUB_TOKEN. Fail fast — every tool is scoped to this user.
+  const tokenHelp =
+    `Create a personal API token in QA Hub (${APP_URL}/settings → API tokens → Create token) and pass it to this ` +
+    'server as the QA_HUB_TOKEN env var, e.g. `claude mcp add qa-hub -e QA_HUB_TOKEN=qah_... -- node ' +
+    '<appDir>/node_modules/tsx/dist/cli.mjs <appDir>/mcp-server/index.ts`, or "env": {"QA_HUB_TOKEN": "qah_..."} ' +
+    "in your MCP config.";
+  const rawToken = process.env.QA_HUB_TOKEN?.trim();
+  if (!rawToken) {
+    log(`QA_HUB_TOKEN is not set. ${tokenHelp}`);
+    await pool.end().catch(() => {});
+    process.exit(1);
+  }
+  const user = await getUserByApiToken(rawToken);
+  if (!user) {
+    log(`QA_HUB_TOKEN is invalid or has been revoked. ${tokenHelp}`);
+    await pool.end().catch(() => {});
+    process.exit(1);
+  }
+  const userId = user.id;
 
   type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
   const ok = (data: unknown): ToolResult => ({
@@ -53,16 +75,20 @@ async function main() {
         return fail(errMessage(e));
       }
     };
-  const planUrl = (id: number) => `${APP_URL}/?plan=${id}`;
+  const planUrl = (projectId: number, planId: number) => `${APP_URL}/projects/${projectId}/plans/${planId}`;
+  const projectUrl = (projectId: number) => `${APP_URL}/projects/${projectId}`;
 
   const server = new McpServer(
-    { name: "qa-hub", version: "0.1.0" },
+    { name: "qa-hub", version: "0.2.0" },
     {
       instructions:
-        "QA Hub stores manual QA test plans for software projects. Typical workflow: " +
-        "list_projects → inspect_repo_changes (see what changed) → get_test_plan (if updating an existing plan) → " +
-        "upsert_test_plan (write the checklist) → a human marks cases Pass/Fail in the web UI → " +
-        "get_failed_test_cases (read failures + tester notes) → fix the code → upsert again if the plan needs changes.",
+        `QA Hub stores manual QA test plans for software projects. You are signed in as ${user.name} <${user.email}>; ` +
+        "every tool only sees this user's projects and plans. Typical workflow: " +
+        "list_projects (match repoPath to your current working directory) → if no project matches, create_project " +
+        "(pass your current working directory as repoPath) → inspect_repo_changes (see what changed) → " +
+        "get_test_plan (if updating an existing plan) → upsert_test_plan (write the checklist; share the returned url) → " +
+        "a human marks cases Pass/Fail in the web UI → get_failed_test_cases (read failures + tester notes) → " +
+        "fix the code → upsert again if the plan needs changes.",
     },
   );
 
@@ -72,31 +98,36 @@ async function main() {
     {
       title: "List projects and their test plans",
       description:
-        "List every QA Hub project (id, name, description, repoPath) together with its test plans " +
-        "(id, title, status, updatedAt). Call this first to find the projectId for the repo you are working in " +
-        "(match repoPath against your working directory) and to see whether a plan for the feature already exists, " +
-        "so you update it instead of creating a duplicate.",
+        "List your QA Hub projects (id, name, description, repoPath) together with their test plans " +
+        "(id, title, status, updatedAt, url). Call this first to find the projectId for the repo you are working in " +
+        "(match repoPath against your current working directory) and to see whether a plan for the feature already " +
+        "exists, so you update it instead of creating a duplicate. If no project matches, call create_project.",
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
     safe("list_projects", async () => {
-      const projectRows = await db.select().from(projects).orderBy(asc(projects.id));
-      const planRows = await db
-        .select({
-          id: testPlans.id,
-          projectId: testPlans.projectId,
-          title: testPlans.title,
-          status: testPlans.status,
-          updatedAt: testPlans.updatedAt,
-        })
-        .from(testPlans)
-        .orderBy(desc(testPlans.updatedAt));
+      const projectRows = await listProjects(userId);
+      const projectIds = projectRows.map((p) => p.id);
+      const planRows = projectIds.length
+        ? await db
+            .select({
+              id: testPlans.id,
+              projectId: testPlans.projectId,
+              title: testPlans.title,
+              status: testPlans.status,
+              updatedAt: testPlans.updatedAt,
+            })
+            .from(testPlans)
+            .where(inArray(testPlans.projectId, projectIds))
+            .orderBy(desc(testPlans.updatedAt))
+        : [];
       return ok(
         projectRows.map((p) => ({
           id: p.id,
           name: p.name,
           description: p.description,
           repoPath: p.repoPath,
+          url: projectUrl(p.id),
           plans: planRows
             .filter((pl) => pl.projectId === p.id)
             .map((pl) => ({
@@ -104,10 +135,42 @@ async function main() {
               title: pl.title,
               status: pl.status,
               updatedAt: pl.updatedAt ? new Date(pl.updatedAt).toISOString() : null,
-              url: planUrl(pl.id),
+              url: planUrl(p.id, pl.id),
             })),
         })),
       );
+    }),
+  );
+
+  // ---------- create_project ----------
+  server.registerTool(
+    "create_project",
+    {
+      title: "Create a QA Hub project",
+      description:
+        "Create a new QA Hub project for the repository you are working in. Use this when list_projects has no " +
+        "project matching your repo (compare repoPath with your current working directory). Pass your CURRENT " +
+        "WORKING DIRECTORY (absolute path of the repo root) as repoPath so inspect_repo_changes can read its git " +
+        "state. Returns the project (id, name, description, repoPath, url); use its id for upsert_test_plan.",
+      inputSchema: {
+        name: z.string().trim().min(1).max(200).describe("Project name, e.g. the repo / product name"),
+        description: z.string().optional().describe("Optional one-line description"),
+        repoPath: z
+          .string()
+          .optional()
+          .describe("Absolute path to the repo root — pass your current working directory"),
+      },
+    },
+    safe("create_project", async (args) => {
+      const project = await createProject(userId, projectInputSchema.parse(args));
+      return ok({
+        id: project.id,
+        name: project.name,
+        description: project.description,
+        repoPath: project.repoPath,
+        createdAt: project.createdAt.toISOString(),
+        url: projectUrl(project.id),
+      });
     }),
   );
 
@@ -140,10 +203,12 @@ async function main() {
       annotations: { readOnlyHint: true },
     },
     safe("inspect_repo_changes", async ({ projectId, base, maxChars }) => {
-      const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
+      const project = await assertProjectOwner(userId, projectId).catch(() => null);
       if (!project) return fail(`Project ${projectId} not found. Call list_projects to see valid ids.`);
       if (!project.repoPath)
-        return fail(`Project ${projectId} (${project.name}) has no repoPath configured; set one in the QA Hub UI.`);
+        return fail(
+          `Project ${projectId} (${project.name}) has no repoPath configured; set one in the QA Hub UI (${projectUrl(projectId)}).`,
+        );
       const [info, diff] = await Promise.all([
         getGitInfo(project.repoPath),
         getGitDiff(project.repoPath, { base, maxChars }),
@@ -196,12 +261,17 @@ async function main() {
       inputSchema: planInputSchema.shape,
     },
     safe("upsert_test_plan", async (args) => {
+      if (!(await assertProjectOwner(userId, args.projectId).catch(() => null)))
+        return fail(`Project ${args.projectId} not found. Call list_projects (or create_project) first.`);
+      if (args.planId && !(await assertPlanOwner(userId, args.planId).catch(() => null)))
+        return fail(`Plan ${args.planId} not found. Call list_projects to see valid plan ids.`);
       const { planId, created } = await upsertPlan(args);
       const plan = await getPlanFull(planId);
       return ok({
         planId,
+        projectId: args.projectId,
         created,
-        url: planUrl(planId),
+        url: planUrl(args.projectId, planId),
         title: plan?.title,
         sections: plan?.sections.length ?? 0,
         counts: plan?.counts ?? null,
@@ -226,9 +296,10 @@ async function main() {
       annotations: { readOnlyHint: true },
     },
     safe("get_failed_test_cases", async ({ planId, runId }) => {
-      const res = await getFailedCases(planId, runId);
-      if (!res) return fail(`Plan ${planId} not found. Call list_projects to see valid plan ids.`);
-      return ok({ ...res, url: planUrl(planId) });
+      const owned = await assertPlanOwner(userId, planId).catch(() => null);
+      const res = owned ? await getFailedCases(planId, runId) : null;
+      if (!owned || !res) return fail(`Plan ${planId} not found. Call list_projects to see valid plan ids.`);
+      return ok({ ...res, url: planUrl(owned.projectId, planId) });
     }),
   );
 
@@ -249,9 +320,10 @@ async function main() {
       annotations: { readOnlyHint: true },
     },
     safe("get_test_plan", async ({ planId, runId }) => {
-      const plan = await getPlanFull(planId, runId);
+      const owned = await assertPlanOwner(userId, planId).catch(() => null);
+      const plan = owned ? await getPlanFull(planId, runId) : null;
       if (!plan) return fail(`Plan ${planId} not found. Call list_projects to see valid plan ids.`);
-      return ok({ ...plan, url: planUrl(planId) });
+      return ok({ ...plan, url: planUrl(plan.projectId, planId) });
     }),
   );
 
@@ -279,7 +351,7 @@ async function main() {
   process.stdin.on("close", () => void shutdown("stdin closed"));
 
   await server.connect(new StdioServerTransport());
-  log(`ready (env: ${fs.existsSync(envPath) ? envPath : "no .env found, using defaults"})`);
+  log(`ready as ${user.email} (env:${fs.existsSync(envPath) ? envPath : "no .env found, using defaults"})`);
 }
 
 main().catch((e) => {

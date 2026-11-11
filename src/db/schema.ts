@@ -14,13 +14,59 @@ export type Tag = { label: string; color: string };
 export type ResultStatus = "not_run" | "pass" | "fail";
 export type PlanStatus = "draft" | "active" | "archived";
 
-export const projects = pgTable("projects", {
+export const users = pgTable("users", {
   id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
   name: text("name").notNull(),
-  description: text("description"),
-  repoPath: text("repo_path"),
+  passwordHash: text("password_hash").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+/** Browser sessions. `id` is sha256(token); the raw token lives only in the cookie. */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("sessions_user_idx").on(t.userId)],
+);
+
+/** Personal API tokens for MCP / REST agents. Only sha256(token) is stored. */
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    prefix: text("prefix").notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("api_tokens_user_idx").on(t.userId)],
+);
+
+export const projects = pgTable(
+  "projects",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    repoPath: text("repo_path"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("projects_user_idx").on(t.userId)],
+);
 
 export const testPlans = pgTable(
   "test_plans",
@@ -103,7 +149,13 @@ export const testResults = pgTable(
   (t) => [uniqueIndex("test_results_run_case_uq").on(t.runId, t.caseId)],
 );
 
-export const projectsRelations = relations(projects, ({ many }) => ({
+export const usersRelations = relations(users, ({ many }) => ({
+  projects: many(projects),
+  sessions: many(sessions),
+  apiTokens: many(apiTokens),
+}));
+export const projectsRelations = relations(projects, ({ one, many }) => ({
+  user: one(users, { fields: [projects.userId], references: [users.id] }),
   plans: many(testPlans),
 }));
 export const testPlansRelations = relations(testPlans, ({ one, many }) => ({
