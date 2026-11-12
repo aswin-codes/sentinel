@@ -1,12 +1,17 @@
 "use client";
 
+import { MoreHorizontal } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errMsg } from "./api";
+import { Menu } from "./Menu";
 import { ConfirmModal } from "./Modal";
 import { ProgressBar } from "./Progress";
+import { RunPicker, type RunDeleteResult } from "./RunPicker";
 import { SectionSidebar, sectionDomId } from "./SectionSidebar";
-import { TestCaseCard } from "./TestCaseCard";
+import { Spinner } from "./Spinner";
+import { TestCaseCard, type NotesState } from "./TestCaseCard";
 import { relativeTime } from "./time";
 import { useToast } from "./Toast";
 import type { CaseWithResult, Counts, Filter, PlanFull, ResultStatus, RunSummary } from "./types";
@@ -24,8 +29,18 @@ export function PlanView({ initialPlan }: { initialPlan: PlanFull }) {
   const toast = useToast();
   const [plan, setPlan] = useState(initialPlan);
   const [filter, setFilter] = useState<Filter>("all");
+  const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [loadingRun, setLoadingRun] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
+  const [deletePlanOpen, setDeletePlanOpen] = useState(false);
+  const [notesState, setNotesState] = useState<Record<number, NotesState>>({});
+  // Per-case bookkeeping so rapid toggles can't race: latest click wins, stale responses are ignored.
+  const seqRef = useRef(new Map<number, number>());
+  const confirmedRef = useRef(new Map<number, ResultStatus>());
+  const chainRef = useRef(new Map<number, Promise<void>>());
+  const notesSeqRef = useRef(new Map<number, number>());
+  const pendingRef = useRef(0);
   const runId = plan.activeRunId;
   const planHref = `/projects/${plan.projectId}/plans/${plan.id}`;
 
@@ -34,6 +49,11 @@ export function PlanView({ initialPlan }: { initialPlan: PlanFull }) {
     async (id: number | null) => {
       try {
         const p = await api<PlanFull>(`/api/plans/${plan.id}${id ? `?runId=${id}` : ""}`);
+        seqRef.current.clear();
+        confirmedRef.current.clear();
+        chainRef.current.clear();
+        notesSeqRef.current.clear();
+        setNotesState({});
         setPlan(p);
         if (p.activeRunId) window.history.replaceState(null, "", `${planHref}?run=${p.activeRunId}`);
       } catch (e) {
@@ -51,7 +71,7 @@ export function PlanView({ initialPlan }: { initialPlan: PlanFull }) {
   useEffect(() => {
     let last = Date.now();
     const onFocus = () => {
-      if (Date.now() - last < 5000) return;
+      if (Date.now() - last < 5000 || pendingRef.current > 0) return;
       last = Date.now();
       void loadRun(runRef.current);
     };
@@ -85,30 +105,92 @@ export function PlanView({ initialPlan }: { initialPlan: PlanFull }) {
 
   const findCase = (caseId: number) => plan.sections.flatMap((s) => s.cases).find((c) => c.id === caseId);
 
-  const setStatus = async (caseId: number, status: ResultStatus) => {
+  const setStatus = (caseId: number, status: ResultStatus) => {
     const c = findCase(caseId);
     if (!c || runId == null) return;
-    const prev = c.result.status;
+    const run = runId;
+    const seqs = seqRef.current;
+    if (!confirmedRef.current.has(caseId)) confirmedRef.current.set(caseId, c.result.status);
+    const seq = (seqs.get(caseId) ?? 0) + 1;
+    seqs.set(caseId, seq);
     updateResult(caseId, (r) => ({ ...r, status }));
-    try {
-      await api("/api/results", { method: "PATCH", body: { runId, caseId, status } });
-    } catch (e) {
-      updateResult(caseId, (r) => ({ ...r, status: prev }));
-      toast(`Couldn't save ${c.code}: ${errMsg(e)}`);
-    }
+    pendingRef.current++;
+    const prior = chainRef.current.get(caseId) ?? Promise.resolve();
+    const next = prior.then(async () => {
+      try {
+        if (seqs.get(caseId) !== seq) return; // superseded by a newer click; that one sends the final state
+        try {
+          await api("/api/results", { method: "PATCH", body: { runId: run, caseId, status } });
+          if (seqs.get(caseId) === seq) confirmedRef.current.set(caseId, status);
+        } catch (e) {
+          if (seqs.get(caseId) !== seq || runRef.current !== run) return;
+          updateResult(caseId, (r) => ({ ...r, status: confirmedRef.current.get(caseId) ?? r.status }));
+          toast(`Couldn't save ${c.code}: ${errMsg(e)}`);
+        }
+      } finally {
+        pendingRef.current--;
+      }
+    });
+    chainRef.current.set(caseId, next);
   };
+
+  const clearNotesState = (caseId: number) =>
+    setNotesState((m) => {
+      const rest = { ...m };
+      delete rest[caseId];
+      return rest;
+    });
 
   const saveNotes = async (caseId: number, notes: string | null) => {
     const c = findCase(caseId);
     if (!c || runId == null) return;
+    const run = runId;
     const prev = c.result.notes;
+    const seq = (notesSeqRef.current.get(caseId) ?? 0) + 1;
+    notesSeqRef.current.set(caseId, seq);
     updateResult(caseId, (r) => ({ ...r, notes }));
+    setNotesState((m) => ({ ...m, [caseId]: "saving" }));
+    pendingRef.current++;
     try {
-      await api("/api/results", { method: "PATCH", body: { runId, caseId, notes } });
+      await api("/api/results", { method: "PATCH", body: { runId: run, caseId, notes } });
+      if (notesSeqRef.current.get(caseId) !== seq) return;
+      setNotesState((m) => ({ ...m, [caseId]: "saved" }));
+      window.setTimeout(() => {
+        if (notesSeqRef.current.get(caseId) === seq) clearNotesState(caseId);
+      }, 1600);
     } catch (e) {
+      if (notesSeqRef.current.get(caseId) !== seq || runRef.current !== run) return;
       updateResult(caseId, (r) => ({ ...r, notes: prev }));
+      clearNotesState(caseId);
       toast(`Couldn't save notes for ${c.code}: ${errMsg(e)}`);
+    } finally {
+      pendingRef.current--;
     }
+  };
+
+  const switchRun = async (id: number) => {
+    setLoadingRun(true);
+    try {
+      await loadRun(id);
+    } finally {
+      setLoadingRun(false);
+    }
+  };
+
+  const onRunDeleted = (res: RunDeleteResult) => {
+    toast(res.recreated ? "Run deleted — started a fresh run" : "Run deleted", "info");
+    if (res.deletedRunId === runId || res.recreated) {
+      router.replace(`${planHref}?run=${res.nextRunId}`);
+    } else {
+      setPlan((p) => ({ ...p, runs: p.runs.filter((r) => r.id !== res.deletedRunId) }));
+    }
+    router.refresh();
+  };
+
+  const deletePlan = async () => {
+    await api(`/api/plans/${plan.id}`, { method: "DELETE" });
+    router.push(`/projects/${plan.projectId}`);
+    router.refresh();
   };
 
   const newRun = async () => {
@@ -116,6 +198,7 @@ export function PlanView({ initialPlan }: { initialPlan: PlanFull }) {
     try {
       const run = await api<RunSummary>("/api/runs", { method: "POST", body: { planId: plan.id } });
       await loadRun(run.id);
+      router.refresh();
     } catch (e) {
       toast(`Couldn't create run: ${errMsg(e)}`);
     } finally {
@@ -126,6 +209,9 @@ export function PlanView({ initialPlan }: { initialPlan: PlanFull }) {
   const clearMarks = async () => {
     if (runId == null) return;
     await api(`/api/runs/${runId}/reset`, { method: "POST" });
+    seqRef.current.clear();
+    confirmedRef.current.clear();
+    setNotesState({});
     setPlan((p) => ({
       ...p,
       sections: p.sections.map((s) => ({
@@ -157,9 +243,17 @@ export function PlanView({ initialPlan }: { initialPlan: PlanFull }) {
       </nav>
 
       <header className="mt-4">
-        <h1 className="text-[24px] font-semibold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere]">
-          {plan.title}
-        </h1>
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="min-w-0 text-[24px] font-semibold leading-tight tracking-[-0.02em] [overflow-wrap:anywhere]">
+            {plan.title}
+          </h1>
+          <Menu
+            ariaLabel="Plan actions"
+            trigger={<MoreHorizontal aria-hidden className="size-4" />}
+            triggerClassName="inline-flex size-8 shrink-0 items-center justify-center rounded-[6px] text-muted transition-colors hover:bg-surface hover:text-fg"
+            items={[{ key: "delete", label: "Delete plan…", danger: true, onSelect: () => setDeletePlanOpen(true) }]}
+          />
+        </div>
         {plan.description && (
           <p className="mt-2 max-w-[720px] text-[14px] leading-relaxed text-muted">{plan.description}</p>
         )}
@@ -177,6 +271,18 @@ export function PlanView({ initialPlan }: { initialPlan: PlanFull }) {
           <span>·</span>
           <span suppressHydrationWarning>Updated {relativeTime(plan.updatedAt)}</span>
         </p>
+        {plan.repoLabels.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-1.5" aria-label="Repositories covered">
+            {plan.repoLabels.map((l) => (
+              <span
+                key={l}
+                className="inline-flex h-5 items-center rounded-[4px] border border-line px-1.5 text-[11px] text-muted"
+              >
+                {l}
+              </span>
+            ))}
+          </div>
+        )}
       </header>
 
       {/* Toolbar */}
@@ -214,28 +320,22 @@ export function PlanView({ initialPlan }: { initialPlan: PlanFull }) {
           </div>
 
           <div className="flex items-center gap-1 sm:ml-auto">
-            <label className="sr-only" htmlFor="run-select">
-              Run
-            </label>
-            <select
-              id="run-select"
-              value={runId ?? ""}
-              onChange={(e) => void loadRun(Number(e.target.value))}
-              className="h-7 max-w-[180px] rounded-[6px] border border-line bg-bg pl-2 pr-1 text-[13px] text-fg focus:border-fg/40 focus:outline-none"
-            >
-              {plan.runs.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-            <button type="button" onClick={newRun} disabled={busy} className={`${btnGhost} h-7 px-2`}>
+            <RunPicker
+              runs={plan.runs}
+              activeRunId={runId}
+              loading={loadingRun}
+              disabled={busy}
+              onSelect={(id) => void switchRun(id)}
+              onDeleted={onRunDeleted}
+            />
+            <button type="button" onClick={newRun} disabled={busy || loadingRun} className={`${btnGhost} h-7 px-2`}>
+              {busy && <Spinner />}
               New run
             </button>
             <button
               type="button"
               onClick={() => setClearOpen(true)}
-              disabled={busy || done === 0}
+              disabled={busy || loadingRun || done === 0}
               className={`${btnGhost} h-7 px-2`}
             >
               Clear marks
@@ -278,6 +378,7 @@ export function PlanView({ initialPlan }: { initialPlan: PlanFull }) {
                       c={c}
                       onStatus={(st) => setStatus(c.id, st)}
                       onSaveNotes={(n) => saveNotes(c.id, n)}
+                      notesState={notesState[c.id]}
                     />
                   ))}
                   {cases.length === 0 && (
@@ -302,8 +403,19 @@ export function PlanView({ initialPlan }: { initialPlan: PlanFull }) {
         title="Clear all marks?"
         description={`Every Pass/Fail mark and note in ${runName} will be removed. This can't be undone.`}
         confirmLabel="Clear marks"
+        pendingLabel="Clearing…"
         danger
         onConfirm={clearMarks}
+      />
+      <ConfirmModal
+        open={deletePlanOpen}
+        onClose={() => setDeletePlanOpen(false)}
+        title="Delete plan?"
+        description={`Delete "${plan.title}" with all its cases and runs? This can't be undone.`}
+        confirmLabel="Delete plan"
+        pendingLabel="Deleting…"
+        danger
+        onConfirm={deletePlan}
       />
     </>
   );

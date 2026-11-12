@@ -7,6 +7,7 @@ import { api, errMsg } from "./api";
 import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { ConfirmModal } from "./Modal";
+import { Spinner } from "./Spinner";
 import { relativeTime } from "./time";
 import { useToast } from "./Toast";
 import type { ApiTokenInfo, CreatedToken, PublicUser } from "./types";
@@ -16,7 +17,7 @@ export function SettingsView({ user, tokens: initialTokens }: { user: PublicUser
   const toast = useToast();
   const router = useRouter();
   const clerk = useClerk();
-  const { user: clerkUser } = useUser();
+  const { user: clerkUser, isLoaded: clerkLoaded } = useUser();
 
   // When the profile is edited in Clerk's modal, re-render the server page (which re-syncs our user row).
   const seenUpdate = useRef<number | null>(null);
@@ -33,6 +34,7 @@ export function SettingsView({ user, tokens: initialTokens }: { user: PublicUser
   const [createError, setCreateError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedToken | null>(null);
   const [toRevoke, setToRevoke] = useState<ApiTokenInfo | null>(null);
+  const [revokingId, setRevokingId] = useState<number | null>(null);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,11 +55,19 @@ export function SettingsView({ user, tokens: initialTokens }: { user: PublicUser
 
   const revoke = async () => {
     if (!toRevoke) return;
-    await api(`/api/tokens/${toRevoke.id}`, { method: "DELETE" });
-    setTokens((ts) => ts.filter((t) => t.id !== toRevoke.id));
-    if (created?.id === toRevoke.id) setCreated(null);
-    toast(`Revoked “${toRevoke.name}”`, "info");
-    setToRevoke(null);
+    const target = toRevoke;
+    setRevokingId(target.id);
+    try {
+      await api(`/api/tokens/${target.id}`, { method: "DELETE" });
+      setTokens((ts) => ts.filter((t) => t.id !== target.id));
+      if (created?.id === target.id) setCreated(null);
+      toast(`Revoked “${target.name}”`, "info");
+      setToRevoke(null);
+    } catch (err) {
+      toast(`Couldn't revoke token: ${errMsg(err)}`);
+    } finally {
+      setRevokingId(null);
+    }
   };
 
   return (
@@ -78,7 +88,12 @@ export function SettingsView({ user, tokens: initialTokens }: { user: PublicUser
                 {[user.email, user.phone].filter(Boolean).join(" · ") || "No contact details"}
               </div>
             </div>
-            <button type="button" onClick={() => clerk.openUserProfile()} className={`${btnSecondary} shrink-0`}>
+            <button
+              type="button"
+              disabled={!clerkLoaded}
+              onClick={() => clerk.openUserProfile()}
+              className={`${btnSecondary} shrink-0`}
+            >
               Manage account
             </button>
           </div>
@@ -107,7 +122,8 @@ export function SettingsView({ user, tokens: initialTokens }: { user: PublicUser
                 maxLength={100}
               />
             </div>
-            <button type="submit" disabled={creating || !name.trim()} className={`${btnPrimary} h-[34px]`}>
+            <button type="submit" disabled={creating || !name.trim()} className={`${btnPrimary} h-[34px] shrink-0`}>
+              {creating && <Spinner />}
               {creating ? "Creating…" : "Create token"}
             </button>
           </form>
@@ -148,7 +164,13 @@ export function SettingsView({ user, tokens: initialTokens }: { user: PublicUser
                       <span>{t.lastUsedAt ? `Last used ${relativeTime(t.lastUsedAt)}` : "Never used"}</span>
                     </div>
                   </div>
-                  <button type="button" onClick={() => setToRevoke(t)} className={`${btnGhost} h-7 px-2 hover:text-fail`}>
+                  <button
+                    type="button"
+                    disabled={revokingId === t.id}
+                    onClick={() => setToRevoke(t)}
+                    className={`${btnGhost} h-7 px-2 hover:text-fail`}
+                  >
+                    {revokingId === t.id && <Spinner />}
                     Revoke
                   </button>
                 </li>
@@ -166,6 +188,7 @@ export function SettingsView({ user, tokens: initialTokens }: { user: PublicUser
           toRevoke ? `Agents using “${toRevoke.name}” will immediately lose access to Sentinel.` : undefined
         }
         confirmLabel="Revoke token"
+        pendingLabel="Revoking…"
         danger
         onConfirm={revoke}
       />

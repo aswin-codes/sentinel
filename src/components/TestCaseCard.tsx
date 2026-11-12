@@ -9,14 +9,18 @@ import { smallLabel } from "./ui";
 
 const NOTES_DEBOUNCE_MS = 800;
 
+export type NotesState = "saving" | "saved";
+
 export function TestCaseCard({
   c,
   onStatus,
   onSaveNotes,
+  notesState,
 }: {
   c: CaseWithResult;
   onStatus: (status: ResultStatus) => void;
   onSaveNotes: (notes: string | null) => void;
+  notesState?: NotesState;
 }) {
   const status = c.result.status;
   const savedNotes = c.result.notes;
@@ -152,6 +156,9 @@ export function TestCaseCard({
                 <span className="shrink-0">Failure notes</span>
                 {!notesOpen && draft.trim() && <span className="min-w-0 truncate text-subtle">— {draft.trim()}</span>}
               </button>
+              <span role="status" aria-live="polite" className="ml-3 inline-block min-w-[52px] text-[12px] text-subtle">
+                {notesState === "saving" ? "Saving…" : notesState === "saved" ? "Saved" : ""}
+              </span>
               {notesOpen && (
                 <textarea
                   id={notesId}

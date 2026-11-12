@@ -57,6 +57,24 @@ export const projects = pgTable(
   (t) => [index("projects_user_idx").on(t.userId)],
 );
 
+/** Repositories that make up a project (e.g. frontend, backend, mobile). Source of truth; projects.repo_path mirrors the first. */
+export const projectRepos = pgTable(
+  "project_repos",
+  {
+    id: serial("id").primaryKey(),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    path: text("path").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("project_repos_project_label_uq").on(t.projectId, t.label),
+    index("project_repos_project_idx").on(t.projectId),
+  ],
+);
+
 export const testPlans = pgTable(
   "test_plans",
   {
@@ -68,6 +86,7 @@ export const testPlans = pgTable(
     description: text("description"),
     gitBranch: text("git_branch"),
     commitHash: text("commit_hash"),
+    repoLabels: jsonb("repo_labels").$type<string[]>().default([]).notNull(),
     status: text("status").$type<PlanStatus>().default("active").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -145,6 +164,10 @@ export const usersRelations = relations(users, ({ many }) => ({
 export const projectsRelations = relations(projects, ({ one, many }) => ({
   user: one(users, { fields: [projects.userId], references: [users.id] }),
   plans: many(testPlans),
+  repos: many(projectRepos),
+}));
+export const projectReposRelations = relations(projectRepos, ({ one }) => ({
+  project: one(projects, { fields: [projectRepos.projectId], references: [projects.id] }),
 }));
 export const testPlansRelations = relations(testPlans, ({ one, many }) => ({
   project: one(projects, { fields: [testPlans.projectId], references: [projects.id] }),

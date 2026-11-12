@@ -1,16 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowDown } from "lucide-react";
-import { Logo } from "@/components/Logo";
-import { btnGhost, btnPrimary, btnSecondary } from "@/components/ui";
+import { btnGhost, btnPrimary } from "@/components/ui";
+import SaaSTemplate from "@/components/ui/saa-s-template";
 import { LiveDemo } from "@/components/landing/LiveDemo";
-import { GitHubMark, GitHubStar, REPO_URL } from "@/components/landing/GitHubStar";
+import { GitHubMark, REPO_URL } from "@/components/landing/GitHubStar";
 import { getCurrentUser } from "@/lib/session";
 
 const HOW = [
   {
     title: "Connect your agent over MCP",
-    body: "Create an API token, paste one config block into Claude Code, Cursor or Antigravity.",
+    body: "Create an API token, paste one config block into Claude Code, Cursor, Copilot, Windsurf, Codex, Gemini CLI or Antigravity.",
     code: '"sentinel": { "command": "node", … }',
   },
   {
@@ -36,7 +35,7 @@ const FAQ = [
   },
   {
     q: "Which agents does it work with?",
-    a: "Anything that speaks MCP: Claude Code, Cursor, Antigravity and other MCP clients. There is also a plain REST API that takes the same token.",
+    a: "Anything that speaks MCP: Claude Code, Cursor, GitHub Copilot, Windsurf, Antigravity, Codex CLI, Gemini CLI, Cline and Roo. Each has a copy-paste setup prompt and config in the Connect agent dialog. There is also a plain REST API that takes the same token.",
   },
   {
     q: "Do I need to write tests?",
@@ -44,72 +43,18 @@ const FAQ = [
   },
 ];
 
-const AGENTS = ["Claude Code", "Cursor", "Antigravity"];
+const AGENTS = ["Claude Code", "Cursor", "Copilot", "Windsurf", "Codex", "Gemini CLI", "Antigravity"];
 
 export default async function Home() {
   if (await getCurrentUser()) redirect("/projects");
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="mx-auto flex h-14 w-full max-w-[1100px] items-center justify-between px-4 sm:px-6">
-        <Logo />
-        <nav className="flex items-center gap-1">
-          <span className="mr-1">
-            <GitHubStar />
-          </span>
-          <Link href="/sign-in" className={btnGhost}>
-            Sign in
-          </Link>
-          <Link href="/sign-up" className={btnPrimary}>
-            Get started
-          </Link>
-        </nav>
-      </header>
+      <SaaSTemplate preview={<LiveDemo />} />
 
       <main className="mx-auto w-full max-w-[1100px] flex-1 px-4 sm:px-6">
-        {/* Hero */}
-        <section className="max-w-[700px] pb-14 pt-20 sm:pb-16 sm:pt-28">
-          <h1 className="text-[34px] font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[48px]">
-            Your agent writes the feature. Sentinel checks it works.
-          </h1>
-          <p className="mt-5 max-w-[560px] text-[15.5px] leading-relaxed text-muted">
-            Coding agents leave test checklists in chat and stray markdown files. Sentinel gives them a home: the agent
-            writes a test plan from your diff, you run it as a Pass/Fail checklist, and the failures go straight back
-            to the agent to fix.
-          </p>
-          <div className="mt-8 flex flex-wrap items-center gap-2">
-            <Link href="/sign-up" className={`${btnPrimary} h-9 px-4`}>
-              Get started
-            </Link>
-            <a href="#demo" className={`${btnSecondary} h-9 px-4`}>
-              See it in action
-              <ArrowDown className="size-3.5" aria-hidden />
-            </a>
-          </div>
-          <p className="mt-4 text-[12.5px] text-subtle">
-            Free and{" "}
-            <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-fg">
-              open source
-            </a>{" "}
-            · self-hosted on your own Postgres
-          </p>
-        </section>
-
-        {/* Live demo */}
-        <section id="demo" aria-labelledby="demo-title" className="scroll-mt-6 pb-20 sm:pb-24">
-          <div className="mb-5 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 id="demo-title" className="text-[15px] font-semibold tracking-[-0.01em]">
-                The loop, start to finish
-              </h2>
-              <p className="mt-1 text-[13.5px] text-muted">A live demo. Nothing here is a recording — click around.</p>
-            </div>
-          </div>
-          <LiveDemo />
-        </section>
-
         {/* How it works */}
-        <section aria-labelledby="how-title" className="border-t border-line py-16 sm:py-20">
+        <section id="how" aria-labelledby="how-title" className="scroll-mt-16 py-16 sm:py-20">
           <h2 id="how-title" className="text-[15px] font-semibold tracking-[-0.01em]">
             How it works
           </h2>
@@ -145,7 +90,7 @@ export default async function Home() {
         </section>
 
         {/* FAQ */}
-        <section aria-labelledby="faq-title" className="border-t border-line py-16 sm:py-20">
+        <section id="faq" aria-labelledby="faq-title" className="scroll-mt-16 border-t border-line py-16 sm:py-20">
           <div className="grid gap-8 sm:grid-cols-[1fr_2fr]">
             <h2 id="faq-title" className="text-[15px] font-semibold tracking-[-0.01em]">
               Questions

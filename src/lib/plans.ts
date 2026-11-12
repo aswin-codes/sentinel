@@ -7,6 +7,7 @@ import { and, asc, count, desc, eq, inArray, max, notInArray } from "drizzle-orm
 import { z } from "zod";
 import { db } from "../db";
 import {
+  projectRepos,
   projects,
   testCases,
   testPlans,
@@ -16,6 +17,7 @@ import {
   type ResultStatus,
   type Tag,
 } from "../db/schema";
+import { listRepos, replaceRepos, repoInputSchema, type RepoDTO } from "./repos";
 
 // ---------- Validation schemas ----------
 
@@ -47,6 +49,7 @@ export const planInputSchema = z.object({
   description: z.string().nullish(),
   gitBranch: z.string().nullish(),
   commitHash: z.string().nullish(),
+  repoLabels: z.array(z.string()).optional().describe("Labels of the project repos this plan covers (optional)"),
   status: z.enum(["draft", "active", "archived"]).optional(),
   sections: z.array(sectionInputSchema).default([]),
   mode: z
@@ -92,6 +95,7 @@ export type PlanFull = {
   description: string | null;
   gitBranch: string | null;
   commitHash: string | null;
+  repoLabels: string[];
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -199,6 +203,7 @@ export async function getPlanFull(planId: number, runId?: number): Promise<PlanF
     description: p.description,
     gitBranch: p.gitBranch,
     commitHash: p.commitHash,
+    repoLabels: p.repoLabels ?? [],
     status: p.status,
     createdAt: iso(p.createdAt)!,
     updatedAt: iso(p.updatedAt)!,
@@ -207,6 +212,16 @@ export async function getPlanFull(planId: number, runId?: number): Promise<PlanF
     activeRunId,
     counts,
   };
+}
+
+/** Reject plan repo labels that aren't repos of the project. */
+async function assertKnownRepoLabels(projectId: number, labels: string[], conn?: Parameters<typeof listRepos>[1]) {
+  const known = new Set((await listRepos(projectId, conn)).map((r) => r.label));
+  const unknown = [...new Set(labels)].filter((l) => !known.has(l));
+  if (unknown.length)
+    throw new BadRequestError(
+      `Unknown repo label(s): ${unknown.join(", ")}. Project repos: ${[...known].join(", ") || "(none)"}`,
+    );
 }
 
 /**
@@ -232,11 +247,14 @@ export async function upsertPlan(raw: PlanInput): Promise<{ planId: number; crea
     if (existing && existing.projectId !== input.projectId)
       throw new BadRequestError(`Plan ${existing.id} belongs to a different project`);
 
+    if (input.repoLabels !== undefined) await assertKnownRepoLabels(input.projectId, input.repoLabels, tx);
+
     const fields = {
       title: input.planTitle,
       ...(input.description !== undefined && { description: input.description }),
       ...(input.gitBranch !== undefined && { gitBranch: input.gitBranch }),
       ...(input.commitHash !== undefined && { commitHash: input.commitHash }),
+      ...(input.repoLabels !== undefined && { repoLabels: input.repoLabels }),
       ...(input.status && { status: input.status }),
     };
 
@@ -376,6 +394,7 @@ export type PlanListItem = {
   description: string | null;
   gitBranch: string | null;
   commitHash: string | null;
+  repoLabels: string[];
   status: string;
   updatedAt: string;
   latestRunId: number | null;
@@ -442,6 +461,7 @@ export async function listPlans(projectId: number): Promise<PlanListItem[]> {
       description: p.description,
       gitBranch: p.gitBranch,
       commitHash: p.commitHash,
+      repoLabels: p.repoLabels ?? [],
       status: p.status,
       updatedAt: iso(p.updatedAt)!,
       latestRunId: runId,
@@ -457,6 +477,7 @@ export const planPatchSchema = z
     status: z.enum(["draft", "active", "archived"]).optional(),
     gitBranch: z.string().nullish(),
     commitHash: z.string().nullish(),
+    repoLabels: z.array(z.string()).optional(),
   })
   .strict();
 
@@ -468,6 +489,12 @@ export async function updatePlan(planId: number, patch: z.infer<typeof planPatch
   if (patch.status !== undefined) set.status = patch.status;
   if (patch.gitBranch !== undefined) set.gitBranch = patch.gitBranch;
   if (patch.commitHash !== undefined) set.commitHash = patch.commitHash;
+  if (patch.repoLabels !== undefined) {
+    const [plan] = await db.select({ projectId: testPlans.projectId }).from(testPlans).where(eq(testPlans.id, planId));
+    if (!plan) throw new NotFoundError(`Plan ${planId} not found`);
+    await assertKnownRepoLabels(plan.projectId, patch.repoLabels);
+    set.repoLabels = patch.repoLabels;
+  }
   const [row] = await db
     .update(testPlans)
     .set(set)
@@ -522,24 +549,40 @@ const repoPathSchema = z
 export const projectInputSchema = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().nullish(),
-  repoPath: repoPathSchema,
+  /** Legacy single repo; treated as one repo labelled "main" when `repos` is absent. */
+  repoPath: repoPathSchema.optional(),
+  repos: z.array(repoInputSchema).optional(),
 });
 
 export const projectPatchSchema = z
   .object({
     name: z.string().trim().min(1).max(200).optional(),
     description: z.string().nullish(),
+    /** Legacy: set/replace repo "main"; null removes it. */
     repoPath: repoPathSchema.optional(),
+    /** Replaces the whole repo list. */
+    repos: z.array(repoInputSchema).optional(),
   })
   .strict();
 
 export type Project = typeof projects.$inferSelect;
+
+export type ProjectWithRepos = {
+  id: number;
+  name: string;
+  description: string | null;
+  /** First repo path (compat). */
+  repoPath: string | null;
+  createdAt: string;
+  repos: RepoDTO[];
+};
 
 export type ProjectListItem = {
   id: number;
   name: string;
   description: string | null;
   repoPath: string | null;
+  repos: RepoDTO[];
   createdAt: string;
   planCount: number;
   /** Latest plan update, or project createdAt when it has no plans. */
@@ -558,16 +601,36 @@ export async function listProjects(userId: number): Promise<ProjectListItem[]> {
     .leftJoin(testPlans, eq(testPlans.projectId, projects.id))
     .where(eq(projects.userId, userId))
     .groupBy(projects.id);
+
+  const ids = rows.map((r) => r.project.id);
+  const repoRows = ids.length
+    ? await db
+        .select()
+        .from(projectRepos)
+        .where(inArray(projectRepos.projectId, ids))
+        .orderBy(asc(projectRepos.id))
+    : [];
+  const reposByProject = new Map<number, RepoDTO[]>();
+  for (const r of repoRows) {
+    const list = reposByProject.get(r.projectId) ?? [];
+    list.push({ id: r.id, label: r.label, path: r.path });
+    reposByProject.set(r.projectId, list);
+  }
+
   return rows
     .map(({ project: p, planCount, lastPlanUpdate }) => {
       const created = new Date(p.createdAt);
       const last = lastPlanUpdate ? new Date(lastPlanUpdate) : null;
       const updated = last && last > created ? last : created;
+      let repos = reposByProject.get(p.id) ?? [];
+      // Legacy backfill (read-only): synthesize "main" (id 0) from repo_path.
+      if (!repos.length && p.repoPath) repos = [{ id: 0, label: "main", path: p.repoPath }];
       return {
         id: p.id,
         name: p.name,
         description: p.description,
-        repoPath: p.repoPath,
+        repoPath: repos[0]?.path ?? null,
+        repos,
         createdAt: created.toISOString(),
         planCount: Number(planCount),
         updatedAt: updated.toISOString(),
@@ -576,35 +639,83 @@ export async function listProjects(userId: number): Promise<ProjectListItem[]> {
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id);
 }
 
+/** Project + its repos. Caller must have checked ownership. Throws NotFoundError if missing. */
+export async function getProjectWithRepos(projectId: number): Promise<ProjectWithRepos> {
+  const [p] = await db.select().from(projects).where(eq(projects.id, projectId));
+  if (!p) throw new NotFoundError(`Project ${projectId} not found`);
+  const repos = await listRepos(projectId);
+  return {
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    repoPath: repos[0]?.path ?? null,
+    createdAt: new Date(p.createdAt).toISOString(),
+    repos,
+  };
+}
+
 export async function createProject(
   userId: number,
   raw: z.input<typeof projectInputSchema>,
-): Promise<Project> {
+): Promise<ProjectWithRepos> {
   const input = projectInputSchema.parse(raw);
+  const repos = input.repos ?? (input.repoPath ? [{ label: "main", path: input.repoPath }] : []);
+  const labels = new Set<string>();
+  for (const r of repos) {
+    if (labels.has(r.label.toLowerCase())) throw new BadRequestError(`Duplicate repo label "${r.label}"`);
+    labels.add(r.label.toLowerCase());
+  }
   const [row] = await db
     .insert(projects)
-    .values({ userId, name: input.name, description: input.description ?? null, repoPath: input.repoPath })
+    .values({
+      userId,
+      name: input.name,
+      description: input.description ?? null,
+      repoPath: repos[0]?.path ?? null,
+    })
     .returning();
-  return row;
+  if (repos.length) {
+    try {
+      await replaceRepos(row.id, repos);
+    } catch (e) {
+      await db.delete(projects).where(eq(projects.id, row.id));
+      throw e;
+    }
+  }
+  return getProjectWithRepos(row.id);
 }
 
 /** Partial project update. Caller must have checked ownership. */
 export async function updateProject(
   projectId: number,
   patch: z.infer<typeof projectPatchSchema>,
-): Promise<Project> {
+): Promise<ProjectWithRepos> {
+  const [existing] = await db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId));
+  if (!existing) throw new NotFoundError(`Project ${projectId} not found`);
+
+  // One transaction: a repo validation/duplicate error must not leave name/description half-saved.
+  await db.transaction(async (tx) => {
   const set: Partial<typeof projects.$inferInsert> = {};
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.description !== undefined) set.description = patch.description;
-  if (patch.repoPath !== undefined) set.repoPath = patch.repoPath;
-  if (!Object.keys(set).length) {
-    const [row] = await db.select().from(projects).where(eq(projects.id, projectId));
-    if (!row) throw new NotFoundError(`Project ${projectId} not found`);
-    return row;
+  if (Object.keys(set).length) await tx.update(projects).set(set).where(eq(projects.id, projectId));
+
+  if (patch.repos !== undefined) {
+    await replaceRepos(projectId, patch.repos, tx);
+  } else if (patch.repoPath !== undefined) {
+    // Legacy: set/replace repo "main" (null removes it), keep the others.
+    const newPath = patch.repoPath;
+    const current = (await listRepos(projectId, tx)).map(({ label, path: p }) => ({ label, path: p }));
+    const hasMain = current.some((r) => r.label === "main");
+    let next = current;
+    if (newPath === null) next = current.filter((r) => r.label !== "main");
+    else if (hasMain) next = current.map((r) => (r.label === "main" ? { ...r, path: newPath } : r));
+    // Appended (repos keep id order). projects.repo_path always mirrors the lowest-id repo.
+    else next = [...current, { label: "main", path: newPath }];
+    await replaceRepos(projectId, next, tx);
   }
-  const [row] = await db.update(projects).set(set).where(eq(projects.id, projectId)).returning();
-  if (!row) throw new NotFoundError(`Project ${projectId} not found`);
-  return row;
+  });
+  return getProjectWithRepos(projectId);
 }
 
 /** Delete a project (cascades to plans, runs, results). Caller must have checked ownership. */

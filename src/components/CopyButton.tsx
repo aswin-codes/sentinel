@@ -55,7 +55,15 @@ export function CopyButton({
       className={`inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-line bg-bg px-2.5 text-[12px] font-medium text-muted transition-colors hover:bg-surface hover:text-fg ${className}`}
     >
       <Icon className="size-3.5" aria-hidden />
-      {!iconOnly && <span>{copied ? copiedLabel : label}</span>}
+      {!iconOnly && (
+        // Both labels share one grid cell so the button width never changes on copy.
+        <span className="inline-grid">
+          <span className={`col-start-1 row-start-1 ${copied ? "invisible" : ""}`}>{label}</span>
+          <span className={`col-start-1 row-start-1 ${copied ? "" : "invisible"}`} aria-hidden={!copied}>
+            {copiedLabel}
+          </span>
+        </span>
+      )}
     </button>
   );
 }

@@ -18,3 +18,6 @@ export const label = "mb-1.5 block text-[13px] font-medium text-fg";
 export const smallLabel = "text-[11px] font-medium uppercase tracking-[0.06em] text-muted";
 
 export const card = "rounded-[8px] border border-line bg-bg";
+
+/** Square icon-only button (pair with btnGhost / btnSecondary). */
+export const btnIcon = "w-8 px-0";

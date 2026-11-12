@@ -3,10 +3,12 @@
 import { useClerk } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
 import { errMsg } from "./api";
 import { Avatar, contactOf } from "./Avatar";
 import { Logo } from "./Logo";
 import { Menu } from "./Menu";
+import { Spinner } from "./Spinner";
 import { useToast } from "./Toast";
 import type { PublicUser } from "./types";
 
@@ -22,11 +24,16 @@ export function AppNav({ user }: { user: PublicUser }) {
   const clerk = useClerk();
   const contact = contactOf(user);
 
+  const [signingOut, setSigningOut] = useState(false);
+
   const signOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
     try {
       await clerk.signOut({ redirectUrl: "/" });
     } catch (e) {
       toast(`Couldn't sign out: ${errMsg(e)}`);
+      setSigningOut(false);
     }
   };
 
@@ -65,7 +72,16 @@ export function AppNav({ user }: { user: PublicUser }) {
             items={[
               { key: "settings", label: "Settings", onSelect: () => router.push("/settings") },
               { key: "account", label: "Manage account", onSelect: () => clerk.openUserProfile() },
-              { key: "signout", label: "Sign out", onSelect: signOut },
+              {
+                key: "signout",
+                label: (
+                  <span className="flex items-center gap-2">
+                    {signingOut ? "Signing out…" : "Sign out"}
+                    {signingOut && <Spinner />}
+                  </span>
+                ),
+                onSelect: signOut,
+              },
             ]}
           />
         </div>

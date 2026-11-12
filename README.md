@@ -1,6 +1,6 @@
 # Sentinel
 
-A self-hostable, multi-user manager for QA test plans. AI coding agents (Claude Code, Cursor, Antigravity, and others) **write** feature test plans through an MCP server or REST API using a personal API token. Humans **run** them in the web UI as Pass/Fail checklists. The agent can then read the failed cases, along with the tester's notes, and fix them.
+A self-hostable, multi-user manager for QA test plans. AI coding agents (Claude Code, Cursor, GitHub Copilot, Windsurf, Antigravity, Codex CLI, Gemini CLI, Cline/Roo, and others) **write** feature test plans through an MCP server or REST API using a personal API token. Humans **run** them in the web UI as Pass/Fail checklists. The agent can then read the failed cases, along with the tester's notes, and fix them.
 
 Every account starts empty and only ever sees its own projects, plans, runs and tokens.
 
@@ -77,7 +77,7 @@ claude mcp add --transport http sentinel https://sentinel-qahub.vercel.app/api/m
   "headers": { "Authorization": "Bearer snt_..." } } } }
 ```
 
-Cursor uses the same JSON without `"type"`. Antigravity uses `"serverUrl"` in place of `"url"`.
+Cursor uses the same JSON without `"type"`. Antigravity and Windsurf use `"serverUrl"` in place of `"url"`, and Gemini CLI uses `"httpUrl"`. The **Connect agent** dialog has a tab for each supported agent (Claude Code, Cursor, GitHub Copilot, Windsurf, Antigravity, Codex CLI, Gemini CLI, Cline, Roo, generic) with a ready-to-paste setup prompt, the exact config file path and snippet (Copilot's `.vscode/mcp.json` uses a top-level `servers` key; Codex uses TOML in `~/.codex/config.toml`), and a CLI one-liner where one exists.
 
 **Local examples.** The stdio server is `mcp-server/index.ts`, run with `tsx`. It loads `.env` from the repo root itself, so it works from any working directory. It **requires** `SENTINEL_TOKEN`. With a missing or revoked token it prints an explanation to stderr and exits. Optional: `SENTINEL_URL` (default `http://localhost:3000`) is used for the plan links the tools return.
 
@@ -141,11 +141,12 @@ For example, you can ask your agent:
 | Tool | Input | Purpose |
 |---|---|---|
 | `list_projects` | – | Your projects (id, name, description, repoPath, url) with their plans |
-| `create_project` | `{name, description?, repoPath?}` | Creates a project (use when `list_projects` has no match; `repoPath` = absolute repo path) |
-| `inspect_repo_changes` | `{projectId, base?, maxChars?}` | Git branch/commit/status/diff stat/recent commits, plus the diff |
+| `create_project` | `{name, description?, repos?: [{label,path}], repoPath?}` | Creates a project (use when `list_projects` has no match). A project can have several repos (frontend, backend, mobile); `repoPath` is the legacy single-repo form |
+| `inspect_repo_changes` | `{projectId, repo?, base?, maxChars?}` | Git branch/commit/status/diff stat/recent commits plus the diff, per repo (`repo` = label; omit for all repos) |
 | `upsert_test_plan` | `PlanInput` (see `src/lib/plans.ts`) | Creates or updates a plan → `{planId, projectId, created, url, counts}` |
 | `get_test_plan` | `{planId, runId?}` | Full plan with per-case results |
 | `get_failed_test_cases` | `{planId, runId?}` | Failed cases with tester notes and agent prompts |
+| `get_project_stats` | `{projectId}` | Pass/fail/not-run rates, per-plan breakdown, most-failing cases and recent-run trend |
 
 ## REST API
 
@@ -193,7 +194,7 @@ curl -H "Authorization: Bearer snt_..." http://localhost:3000/api/projects
 
 ```
 src/db/          Drizzle schema + pg pool
-src/lib/         Shared services (auth, plans, git) used by the API routes AND the MCP server
+src/lib/         Shared services (auth, plans, repos, runs, stats, git) used by the API routes AND the MCP server
 src/app/         Next.js UI + /api route handlers
 src/components/  UI components
 mcp-server/      Stdio MCP server

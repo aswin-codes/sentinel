@@ -1,5 +1,5 @@
 import { assertProjectOwner } from "@/lib/auth";
-import { deleteProject, projectPatchSchema, updateProject } from "@/lib/plans";
+import { deleteProject, getProjectWithRepos, projectPatchSchema, updateProject } from "@/lib/plans";
 import { requireRequestUser } from "@/lib/session";
 import { handle, ok, parseId, readJson } from "@/lib/api";
 
@@ -10,7 +10,9 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export const GET = handle(async (req: Request, { params }: Ctx) => {
   const user = await requireRequestUser(req);
-  return ok(await assertProjectOwner(user.id, parseId((await params).id)));
+  const id = parseId((await params).id);
+  await assertProjectOwner(user.id, id);
+  return ok(await getProjectWithRepos(id));
 });
 
 export const PATCH = handle(async (req: Request, { params }: Ctx) => {

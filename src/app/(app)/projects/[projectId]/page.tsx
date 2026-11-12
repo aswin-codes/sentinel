@@ -5,7 +5,7 @@ import { ProjectView } from "@/components/ProjectView";
 import type { McpSetup, ProjectDTO } from "@/components/types";
 import { parsePositiveId } from "@/components/url";
 import { assertProjectOwner } from "@/lib/auth";
-import { listPlans } from "@/lib/plans";
+import { getProjectWithRepos, listPlans } from "@/lib/plans";
 import { requireUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -21,12 +21,14 @@ async function loadProject(userId: number, projectId: string): Promise<ProjectDT
   } catch {
     notFound();
   }
+  const full = await getProjectWithRepos(p.id);
   return {
-    id: p.id,
-    name: p.name,
-    description: p.description,
-    repoPath: p.repoPath,
-    createdAt: new Date(p.createdAt).toISOString(),
+    id: full.id,
+    name: full.name,
+    description: full.description,
+    repoPath: full.repoPath,
+    repos: full.repos,
+    createdAt: new Date(full.createdAt).toISOString(),
   };
 }
 
@@ -37,13 +39,26 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   return { title: project.name };
 }
 
-export default async function ProjectPage({ params }: { params: Params }) {
+export default async function ProjectPage({
+  params,
+  searchParams,
+}: {
+  params: Params;
+  searchParams: Promise<{ tab?: string | string[] }>;
+}) {
   const { projectId } = await params;
+  const { tab } = await searchParams;
   const user = await requireUser();
   const project = await loadProject(user.id, projectId);
-  const plans = await listPlans(project.id);
-  const mcp = await mcpSetup();
-  return <ProjectView project={project} plans={plans} mcp={mcp} />;
+  const [plans, mcp] = await Promise.all([listPlans(project.id), mcpSetup()]);
+  return (
+    <ProjectView
+      project={project}
+      plans={plans}
+      mcp={mcp}
+      initialTab={tab === "stats" ? "stats" : "plans"}
+    />
+  );
 }
 
 /**

@@ -3,61 +3,25 @@
 import Link from "next/link";
 import { useState } from "react";
 import { api, errMsg } from "./api";
+import { AGENTS, TOKEN_PLACEHOLDER as PLACEHOLDER, buildAgentGuide, type AgentId } from "./agents";
 import { CopyButton } from "./CopyButton";
 import { InlineCode } from "./InlineCode";
 import { Modal } from "./Modal";
+import { Spinner } from "./Spinner";
 import type { CreatedToken, McpSetup } from "./types";
 import { btnSecondary, smallLabel } from "./ui";
-
-type TabId = "claude" | "cursor" | "antigravity";
-
-const TABS: { id: TabId; label: string }[] = [
-  { id: "claude", label: "Claude Code" },
-  { id: "cursor", label: "Cursor" },
-  { id: "antigravity", label: "Antigravity" },
-];
-
-const PLACEHOLDER = "snt_YOUR_TOKEN";
-
-type Snippets = { cli: string; claudeJson: string; cursorJson: string; antigravityJson: string };
-const json = (servers: Record<string, unknown>) => JSON.stringify({ mcpServers: { sentinel: servers } }, null, 2);
-
-/** Hosted: nothing to install — the agent talks to <origin>/api/mcp over HTTP with the token. */
-function cloudSnippets(appUrl: string, tok: string): Snippets {
-  const url = `${appUrl.replace(/\/$/, "")}/api/mcp`;
-  const headers = { Authorization: `Bearer ${tok}` };
-  return {
-    cli: `claude mcp add --transport http sentinel ${url} --header "Authorization: Bearer ${tok}"`,
-    claudeJson: json({ type: "http", url, headers }),
-    cursorJson: json({ url, headers }),
-    antigravityJson: json({ serverUrl: url, headers }),
-  };
-}
-
-/** Local: the agent starts the stdio server from this checkout (can also read git itself). */
-function localSnippets(appDir: string, tok: string): Snippets {
-  const tsx = `${appDir}/node_modules/tsx/dist/cli.mjs`;
-  const entry = `${appDir}/mcp-server/index.ts`;
-  const config = json({ command: "node", args: [tsx, entry], env: { SENTINEL_TOKEN: tok } });
-  return {
-    cli: `claude mcp add sentinel -e SENTINEL_TOKEN=${tok} -- node ${tsx} ${entry}`,
-    claudeJson: config,
-    cursorJson: config,
-    antigravityJson: config,
-  };
-}
 
 export const examplePrompt = (projectName: string) =>
   `Inspect my recent changes in ${projectName} and create a QA test plan for them in Sentinel.`;
 
-function CodeBlock({ code, label }: { code: string; label: string }) {
+function CodeBlock({ code, label, maxH = "max-h-56" }: { code: string; label: string; maxH?: string }) {
   return (
     <div className="overflow-hidden rounded-[8px] border border-line">
       <div className="flex items-center justify-between border-b border-line bg-surface px-3 py-1.5">
         <span className="font-mono text-[11.5px] text-muted">{label}</span>
         <CopyButton text={code} className="h-6 px-2" />
       </div>
-      <pre className="overflow-x-auto px-3 py-2.5 font-mono text-[12px] leading-relaxed">
+      <pre className={`${maxH} overflow-auto px-3 py-2.5 font-mono text-[12px] leading-relaxed`}>
         <code>{code}</code>
       </pre>
     </div>
@@ -76,19 +40,19 @@ export function ConnectAgentModal({
   mcp: McpSetup;
   projectName: string;
 }) {
-  const [tab, setTab] = useState<TabId>("claude");
+  const [tab, setTab] = useState<AgentId>("claude-code");
   const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const tok = token ?? PLACEHOLDER;
-  const snippets = mcp.mode === "cloud" ? cloudSnippets(mcp.appUrl, tok) : localSnippets(mcp.appDir, tok);
+  const guide = buildAgentGuide(tab, mcp, tok);
   const prompt = examplePrompt(projectName);
 
   const generate = async () => {
     setBusy(true);
     setError(null);
-    const agent = TABS.find((t) => t.id === tab)?.label ?? "Agent";
+    const agent = AGENTS.find((t) => t.id === tab)?.label ?? "Agent";
     try {
       const t = await api<CreatedToken>("/api/tokens", { method: "POST", body: { name: `${agent} – ${projectName}` } });
       setToken(t.token);
@@ -122,6 +86,7 @@ export function ConnectAgentModal({
           ) : (
             <div className="flex flex-wrap items-center gap-3">
               <button type="button" onClick={generate} disabled={busy} className={btnSecondary}>
+                {busy && <Spinner />}
                 {busy ? "Generating…" : "Generate token"}
               </button>
               <span>
@@ -143,16 +108,20 @@ export function ConnectAgentModal({
               ? "Connects to Sentinel's hosted MCP server — nothing to install."
               : "Runs Sentinel's MCP server from this local copy of the app."}
           </p>
-          <div role="tablist" aria-label="Agent" className="mb-3 flex gap-4 border-b border-line">
-            {TABS.map((t) => (
+          <div
+            role="tablist"
+            aria-label="Agent"
+            className="mb-3 flex gap-1 overflow-x-auto rounded-[8px] border border-line bg-surface p-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {AGENTS.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 role="tab"
                 aria-selected={tab === t.id}
                 onClick={() => setTab(t.id)}
-                className={`-mb-px border-b px-0.5 pb-2 text-[13px] transition-colors ${
-                  tab === t.id ? "border-fg text-fg" : "border-transparent text-muted hover:text-fg"
+                className={`h-7 shrink-0 whitespace-nowrap rounded-[6px] px-2.5 text-[12.5px] transition-colors ${
+                  tab === t.id ? "bg-bg font-medium text-fg ring-1 ring-line" : "text-muted hover:text-fg"
                 }`}
               >
                 {t.label}
@@ -160,36 +129,25 @@ export function ConnectAgentModal({
             ))}
           </div>
 
-          <div role="tabpanel" className="space-y-3">
-            {tab === "claude" && (
-              <>
-                <p>Run this in your project&apos;s terminal:</p>
-                <CodeBlock label="Terminal" code={snippets.cli} />
-                <p>
-                  Or add it to <InlineCode>.mcp.json</InlineCode> (project) or <InlineCode>~/.claude.json</InlineCode>{" "}
-                  (all projects):
-                </p>
-                <CodeBlock label=".mcp.json" code={snippets.claudeJson} />
-              </>
-            )}
-            {tab === "cursor" && (
-              <>
-                <p>
-                  Add this to <InlineCode>.cursor/mcp.json</InlineCode> in your project (or{" "}
-                  <InlineCode>~/.cursor/mcp.json</InlineCode>), then enable <span className="text-fg">sentinel</span> in
-                  Settings → MCP.
-                </p>
-                <CodeBlock label=".cursor/mcp.json" code={snippets.cursorJson} />
-              </>
-            )}
-            {tab === "antigravity" && (
-              <>
-                <p>
-                  Agent panel menu → MCP Servers → Manage → View raw config, then merge this into{" "}
-                  <InlineCode>mcp_config.json</InlineCode>:
-                </p>
-                <CodeBlock label="mcp_config.json" code={snippets.antigravityJson} />
-              </>
+          <div role="tabpanel" className="min-h-[24rem] space-y-3">
+            <div>
+              <p className="mb-1.5">
+                <span className="text-fg">Setup prompt</span> — paste into {guide.name} and it configures Sentinel
+                itself.
+              </p>
+              <CodeBlock label="Prompt" code={guide.setupPrompt} maxH="max-h-40" />
+            </div>
+            <div>
+              <p className="mb-1.5">
+                <span className="text-fg">Or add it manually</span> to <InlineCode>{guide.configPath}</InlineCode>
+              </p>
+              <CodeBlock label={guide.configLang === "toml" ? "config.toml" : "JSON"} code={guide.configSnippet} />
+            </div>
+            {guide.cli && (
+              <div>
+                <p className="mb-1.5">Or with the CLI:</p>
+                <CodeBlock label="Terminal" code={guide.cli} maxH="max-h-24" />
+              </div>
             )}
           </div>
         </div>

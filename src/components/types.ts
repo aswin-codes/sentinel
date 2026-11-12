@@ -1,4 +1,5 @@
 import type { CaseWithResult } from "@/lib/plans";
+import type { RepoDTO } from "@/lib/repos";
 
 export type {
   PlanFull,
@@ -7,7 +8,16 @@ export type {
   RunSummary,
   PlanListItem,
   ProjectListItem,
+  ProjectWithRepos,
 } from "@/lib/plans";
+export type { RepoDTO, RepoGitInfo } from "@/lib/repos";
+export type {
+  ProjectStats,
+  UserStatsSummary,
+  TrendPoint,
+  PlanStat,
+  FailingCase,
+} from "@/lib/stats";
 export type { GitInfo } from "@/lib/git";
 export type { PublicUser } from "@/lib/auth";
 
@@ -21,6 +31,7 @@ export type ProjectDTO = {
   name: string;
   description: string | null;
   repoPath: string | null;
+  repos: RepoDTO[];
   createdAt: string;
 };
 

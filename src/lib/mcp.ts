@@ -13,6 +13,8 @@ import { db } from "../db";
 import { testPlans } from "../db/schema";
 import { assertPlanOwner, assertProjectOwner, type PublicUser } from "./auth";
 import { getGitDiff, getGitInfo } from "./git";
+import { listRepos, repoInputSchema } from "./repos";
+import { getProjectStats } from "./stats";
 import {
   createProject,
   getFailedCases,
@@ -72,16 +74,20 @@ export function createSentinelMcpServer(opts: {
       : "run `git status`, `git diff` (or `git diff main...HEAD`) and `git log -5 --oneline` in your own terminal to see what changed";
 
   const server = new McpServer(
-    { name: "sentinel", version: "0.3.0" },
+    { name: "sentinel", version: "0.4.0" },
     {
       instructions:
         `Sentinel stores manual QA test plans for software projects. You are signed in as ${userLabel}; ` +
         "every tool only sees this user's projects and plans. Typical workflow: " +
-        "list_projects (match repoPath to your current working directory) → if no project matches, create_project " +
-        `(pass your current working directory as repoPath) → ${changesStep} → ` +
-        "get_test_plan (if updating an existing plan) → upsert_test_plan (write the checklist, include gitBranch/commitHash; " +
+        "list_projects (a project can have several repositories, e.g. frontend/backend/mobile; match ANY of its repo " +
+        "paths to your current working directory) → if no project matches, create_project " +
+        "(pass your current working directory as a repo: repos=[{label, path}]; add the other repos of the product too) → " +
+        `${changesStep} → ` +
+        "get_test_plan (if updating an existing plan) → upsert_test_plan (write the checklist, include gitBranch/commitHash " +
+        "and optionally repoLabels = the repo labels the plan covers; " +
         "share the returned url) → a human marks cases Pass/Fail in the web UI → get_failed_test_cases (read failures + " +
-        "tester notes) → fix the code → upsert again if the plan needs changes.",
+        "tester notes) → fix the code → upsert again if the plan needs changes. " +
+        "Use get_project_stats to summarize a project's testing health (pass/fail rates, most failing cases, trend).",
     },
   );
 
@@ -91,9 +97,9 @@ export function createSentinelMcpServer(opts: {
     {
       title: "List projects and their test plans",
       description:
-        "List your Sentinel projects (id, name, description, repoPath) together with their test plans " +
+        "List your Sentinel projects (id, name, description, repos[{label,path}], repoPath = first repo) with their test plans " +
         "(id, title, status, updatedAt, url). Call this first to find the projectId for the repo you are working in " +
-        "(match repoPath against your current working directory) and to see whether a plan for the feature already " +
+        "(match ANY of a project repos[].path against your current working directory) and to see whether a plan for the feature already " +
         "exists, so you update it instead of creating a duplicate. If no project matches, call create_project.",
       inputSchema: {},
       annotations: { readOnlyHint: true },
@@ -120,6 +126,7 @@ export function createSentinelMcpServer(opts: {
           name: p.name,
           description: p.description,
           repoPath: p.repoPath,
+          repos: p.repos.map((r) => ({ label: r.label, path: r.path })),
           url: projectUrl(p.id),
           plans: planRows
             .filter((pl) => pl.projectId === p.id)
@@ -141,14 +148,23 @@ export function createSentinelMcpServer(opts: {
     {
       title: "Create a Sentinel project",
       description:
-        "Create a new Sentinel project for the repository you are working in. Use this when list_projects has no " +
-        "project matching your repo (compare repoPath with your current working directory). Pass your CURRENT " +
-        "WORKING DIRECTORY (absolute path of the repo root) as repoPath so future sessions can match it. Returns the " +
-        "project (id, name, description, repoPath, url); use its id for upsert_test_plan.",
+        "Create a new Sentinel project for the product you are working on. Use this when list_projects has no " +
+        "project matching your repo (compare each project's repos[].path with your current working directory). A project " +
+        "can consist of several repositories: pass `repos` as [{label, path}] (e.g. frontend, backend, mobile) with " +
+        "absolute paths; include your CURRENT WORKING DIRECTORY so future sessions can match it. `repoPath` is a legacy " +
+        'single-repo shortcut (becomes repo "main"). Returns the project (id, name, description, repos, url); use its ' +
+        "id for upsert_test_plan.",
       inputSchema: {
         name: z.string().trim().min(1).max(200).describe("Project name, e.g. the repo / product name"),
         description: z.string().optional().describe("Optional one-line description"),
-        repoPath: z.string().optional().describe("Absolute path to the repo root — pass your current working directory"),
+        repos: z
+          .array(repoInputSchema)
+          .optional()
+          .describe('Repositories of the project: [{label: "frontend", path: "/abs/path"}]. Absolute paths, unique labels.'),
+        repoPath: z
+          .string()
+          .optional()
+          .describe('Legacy: single repo root (stored as repo "main"). Prefer `repos`.'),
       },
     },
     safe("create_project", async (args) => {
@@ -158,27 +174,31 @@ export function createSentinelMcpServer(opts: {
         name: project.name,
         description: project.description,
         repoPath: project.repoPath,
-        createdAt: project.createdAt.toISOString(),
+        repos: project.repos.map((r) => ({ label: r.label, path: r.path })),
+        createdAt: project.createdAt,
         url: projectUrl(project.id),
       });
     }),
   );
 
-  // ---------- inspect_repo_changes (local only: needs the repo on this machine) ----------
+  // ---------- inspect_repo_changes (local only: needs the repos on this machine) ----------
   if (mode === "local") {
     server.registerTool(
       "inspect_repo_changes",
       {
-        title: "Inspect git changes in a project's repo",
+        title: "Inspect git changes in a project's repos",
         description:
-          "Return git context for a project's repository (its configured repoPath): current branch, short commit hash, " +
-          "`git status`, `diff --stat`, the last 10 commits, and the full diff. Without `base` the diff is the working " +
-          'tree vs HEAD (uncommitted changes); with `base` (e.g. "main") it is everything that differs from that ref, ' +
-          "including committed branch work. USE THIS BEFORE WRITING A TEST PLAN so the plan covers what actually " +
-          "changed, and pass the returned branch / commitHash into upsert_test_plan (gitBranch, commitHash). " +
-          "Large diffs are truncated to maxChars (default 60000); `truncated: true` tells you when that happened.",
+          "Return git context for a project's repositories (a project may have several, e.g. frontend/backend): per repo " +
+          "the current branch, short commit hash, `git status`, `diff --stat`, the last 10 commits, and the full diff. " +
+          "Omit `repo` to inspect ALL repos of the project, or pass a repo label (see list_projects) for just one. " +
+          'Without `base` the diff is the working tree vs HEAD (uncommitted changes); with `base` (e.g. "main") it is ' +
+          "everything that differs from that ref, including committed branch work. USE THIS BEFORE WRITING A TEST PLAN " +
+          "so the plan covers what actually changed, and pass the returned branch / commitHash into upsert_test_plan " +
+          "(gitBranch, commitHash, repoLabels). Large diffs are truncated per repo to maxChars (default 60000); " +
+          "`diffTruncated: true` tells you when that happened.",
         inputSchema: {
           projectId: z.number().int().positive().describe("Project id from list_projects"),
+          repo: z.string().optional().describe("Repo label to inspect (default: all repos of the project)."),
           base: z
             .string()
             .optional()
@@ -189,32 +209,35 @@ export function createSentinelMcpServer(opts: {
             .positive()
             .max(500_000)
             .optional()
-            .describe("Truncate the diff to this many characters (default 60000)."),
+            .describe("Truncate each repo's diff to this many characters (default 60000)."),
         },
         annotations: { readOnlyHint: true },
       },
-      safe("inspect_repo_changes", async ({ projectId, base, maxChars }) => {
+      safe("inspect_repo_changes", async ({ projectId, repo, base, maxChars }) => {
         const project = await assertProjectOwner(userId, projectId).catch(() => null);
         if (!project) return fail(`Project ${projectId} not found. Call list_projects to see valid ids.`);
-        if (!project.repoPath)
+        const all = await listRepos(project.id);
+        if (!all.length)
           return fail(
-            `Project ${projectId} (${project.name}) has no repoPath configured; set one in the Sentinel UI (${projectUrl(projectId)}).`,
+            `Project ${projectId} (${project.name}) has no repositories configured; add one in the Sentinel UI (${projectUrl(projectId)}).`,
           );
-        const [info, diff] = await Promise.all([
-          getGitInfo(project.repoPath),
-          getGitDiff(project.repoPath, { base, maxChars }),
-        ]);
-        if (!info.ok) return fail(`git info failed: ${info.error}`, { repoPath: project.repoPath });
-        return ok({
-          projectId: project.id,
-          projectName: project.name,
-          repoPath: project.repoPath,
-          base: base ?? null,
-          ...info,
-          diff: diff.ok ? diff.diff : null,
-          diffTruncated: diff.truncated ?? false,
-          diffError: diff.ok ? undefined : diff.error,
-        });
+        const selected = repo ? all.filter((r) => r.label === repo) : all;
+        if (!selected.length)
+          return fail(`Repo "${repo}" not found in project ${projectId}.`, { validLabels: all.map((r) => r.label) });
+        const repos = await Promise.all(
+          selected.map(async (r) => {
+            const [info, diff] = await Promise.all([getGitInfo(r.path), getGitDiff(r.path, { base, maxChars })]);
+            return {
+              label: r.label,
+              path: r.path,
+              ...info,
+              diff: diff.ok ? diff.diff : null,
+              diffTruncated: diff.truncated ?? false,
+              diffError: diff.ok ? undefined : diff.error,
+            };
+          }),
+        );
+        return ok({ projectId: project.id, projectName: project.name, base: base ?? null, repos });
       }),
     );
   }
@@ -320,6 +343,29 @@ export function createSentinelMcpServer(opts: {
       const plan = owned ? await getPlanFull(planId, runId) : null;
       if (!plan) return fail(`Plan ${planId} not found. Call list_projects to see valid plan ids.`);
       return ok({ ...plan, url: planUrl(plan.projectId, planId) });
+    }),
+  );
+
+  // ---------- get_project_stats ----------
+  server.registerTool(
+    "get_project_stats",
+    {
+      title: "Get project testing stats",
+      description:
+        "Summarize a project's testing health: pass / fail / not-run counts and rates (over each plan's latest run), " +
+        "the most failing test cases across runs, a per-plan breakdown, and a trend over the most recent runs. " +
+        "Use it to answer 'how is testing going?' or to decide what to fix first. Rates are fractions 0..1. " +
+        "Get projectId from list_projects.",
+      inputSchema: {
+        projectId: z.number().int().positive().describe("Project id from list_projects"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    safe("get_project_stats", async ({ projectId }) => {
+      const project = await assertProjectOwner(userId, projectId).catch(() => null);
+      if (!project) return fail(`Project ${projectId} not found. Call list_projects to see valid ids.`);
+      const stats = await getProjectStats(project.id);
+      return ok({ ...stats, projectName: project.name, url: projectUrl(projectId) });
     }),
   );
 
