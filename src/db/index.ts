@@ -1,9 +1,11 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "./schema";
+import { normalizeDatabaseUrl } from "./url";
 
-const connectionString =
-  process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/qahub";
+const connectionString = normalizeDatabaseUrl(
+  process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/qahub",
+);
 
 // Reuse one pool across Next.js dev hot reloads.
 const globalForDb = globalThis as unknown as { __sentinelPool?: Pool };
