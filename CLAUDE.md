@@ -10,7 +10,7 @@ no demo/seed data anywhere.
 - **PostgreSQL** (`qahub` db) via `drizzle-orm/node-postgres` + `pg`
 - `DATABASE_URL` in `.env` (gitignored). Next loads it; the MCP server loads it with `process.loadEnvFile`.
 - Zod v4 for all validation. `@modelcontextprotocol/sdk` for the MCP server (run with `tsx`).
-- Auth (humans): **Clerk** (`@clerk/nextjs` v7). Sign-in methods = Google + phone (SMS) only, configured in the
+- Auth (humans): **Clerk** (`@clerk/nextjs` v7). Sign-in methods = Google + email (one-time code) only (free tier, no SMS), configured in the
   Clerk dashboard (not in code). Keys `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` in `.env`/`.env.local` (required in v7;
   for dev, `npx clerk@latest init` writes temporary keyless keys). Local `users` row (keyed by `clerk_user_id`) is created lazily on first request — no webhooks.
 - Auth (agents): personal API tokens `qah_...` (sha256 stored, shown once) — never Clerk.
@@ -46,7 +46,7 @@ mcp-server/index.ts     Stdio MCP server; requires QA_HUB_TOKEN env; relative im
 
 ## DB conventions
 - Tables snake_case, TS fields camelCase, `serial` ids. `projects.user_id` → users (cascade).
-- `users`: `clerk_user_id` unique; `email`/`phone`/`avatar_url` nullable (phone-only users have no email). No password/session tables.
+- `users`: `clerk_user_id` unique; `email`/`phone`/`avatar_url` nullable (phone column kept for future use; unused while sign-in is Google + email). No password/session tables.
 - `steps`/`expected` = `jsonb string[]`; `tags` = `jsonb {label,color}[]`.
 - `test_results` unique on `(run_id, case_id)`. **Missing row = `not_run`.**
 - Plans unique on `(project_id, title)`; sections on `(plan_id, code)`; cases on `(section_id, code)` — upserts preserve case ids and results.

@@ -31,27 +31,26 @@ CLERK_SECRET_KEY=sk_...
 
 ## Authentication (Clerk)
 
-Sign-in is handled by [Clerk](https://clerk.com). QA Hub allows exactly two sign-in methods: **Google** and **phone number (SMS code)**. The pages are `/sign-in` and `/sign-up`. After signing in you land on `/projects`. The old `/login` and `/signup` URLs redirect to them.
+Sign-in is handled by [Clerk](https://clerk.com). QA Hub uses two sign-in methods: **Google** and **email (one-time code)**. Both work on Clerk's free tier. The pages are `/sign-in` and `/sign-up`. After signing in you land on `/projects`. The old `/login` and `/signup` URLs redirect to them.
 
-**Local development without a Clerk account (keyless mode).** Run `npx clerk@latest init`. It needs no Clerk account and writes temporary development keys, so you can sign in right away. A "Configure your application" prompt in the browser links to the page where you *claim* the instance. A keyless instance uses Clerk's defaults (email + password + Google). To restrict it to Google and phone, claim it (sign in to Clerk). It then becomes a normal app in your dashboard. Then follow steps 2–4 below. The `@clerk/nextjs` v7 SDK needs the keys present in the environment and won't start without them.
+**Local development without a Clerk account (keyless mode).** Run `npx clerk@latest init`. It needs no Clerk account and writes temporary development keys, so you can sign in right away. A "Configure your application" prompt in the browser links to the page where you *claim* the instance. A keyless instance uses Clerk's defaults (email + password + Google). To switch email to one-time codes, claim it (sign in to Clerk). It then becomes a normal app in your dashboard. Then follow steps 2–4 below. The `@clerk/nextjs` v7 SDK needs the keys present in the environment and won't start without them.
 
 **Set up the Clerk application:**
 
 1. In the [Clerk dashboard](https://dashboard.clerk.com), create an application (or claim the keyless one).
 2. **Configure → User & authentication**:
-   - **Email address**: turn off *Sign-up with email* and *Sign-in with email*, including verification code, verification link and password. Clerk may keep email as an optional profile attribute. It is just not used for sign-in.
-   - **Phone number**: turn on *Sign-up with phone* and *Sign-in with phone*, with **SMS verification code**.
-   - **Username**: off. **Password**: off.
+   - **Email address**: turn on *Sign-up with email* and *Sign-in with email*, using **email verification code**.
+   - **Phone number**: off. **Username**: off. **Password**: off.
 3. **Configure → SSO connections**: enable **Google** and remove every other provider. Development instances use Clerk's shared Google credentials. For production, enter your own Google OAuth client ID and secret, using the redirect URI Clerk shows.
 4. Under **API keys**, copy the keys into `.env` as `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`, then restart `npm run dev`.
 
-No other Clerk env vars are needed: the sign-in and sign-up URLs, and the redirect after sign-in (`/projects`), are set in code. Development instances send SMS only within a limited quota or to test numbers. Check Clerk's SMS pricing and supported countries before going to production.
+No other Clerk env vars are needed: the sign-in and sign-up URLs, and the redirect after sign-in (`/projects`), are set in code.
 
-**How it maps to QA Hub data.** Clerk owns identities and browser sessions. The first time a Clerk user opens the app, QA Hub creates a local `users` row (Clerk user id, name, email or phone, avatar). That row owns projects, plans and API tokens. Name, photo and sign-in methods are edited through **Settings → Manage account**, which opens Clerk's profile dialog. Agents never touch Clerk. They use personal `qah_...` API tokens.
+**How it maps to QA Hub data.** Clerk owns identities and browser sessions. The first time a Clerk user opens the app, QA Hub creates a local `users` row (Clerk user id, name, email, avatar). That row owns projects, plans and API tokens. Name, photo and sign-in methods are edited through **Settings → Manage account**, which opens Clerk's profile dialog. Agents never touch Clerk. They use personal `qah_...` API tokens.
 
 ## Getting started
 
-1. Open http://localhost:3000/sign-up and continue with Google or your phone number.
+1. Open http://localhost:3000/sign-up and continue with Google or your email.
 2. **Create a project.** Give it a name and, ideally, the absolute path of the repo it tests (`repoPath`) so agents can read its git changes. Agents can also create projects themselves with the `create_project` MCP tool.
 3. Go to **Settings → API tokens → Create token**. Copy the `qah_...` token. It is shown only once.
 4. Add the MCP server to your agent with that token (see below), or call the REST API with `Authorization: Bearer qah_...`.
