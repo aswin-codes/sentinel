@@ -17,6 +17,9 @@ export default clerkMiddleware(
 
 export const config = {
   matcher: [
+    // Clerk auto-proxy on production *.vercel.app hosts (https://<app>.vercel.app/__clerk). Listed
+    // explicitly because the static-file rule below would skip proxied assets like clerk.browser.js.
+    "/__clerk/:path*",
     // Skip Next.js internals and static files, unless found in search params
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     // Always run for API routes
