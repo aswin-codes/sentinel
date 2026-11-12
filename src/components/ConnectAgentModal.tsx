@@ -18,6 +18,7 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 const PLACEHOLDER = "snt_YOUR_TOKEN";
+const DIR_PLACEHOLDER = "<path-to-sentinel>";
 
 export const examplePrompt = (projectName: string) =>
   `Inspect my recent changes in ${projectName} and create a QA test plan for them in Sentinel.`;
@@ -40,11 +41,15 @@ export function ConnectAgentModal({
   open,
   onClose,
   appDir,
+  appUrl,
   projectName,
 }: {
   open: boolean;
   onClose: () => void;
-  appDir: string;
+  /** Local Sentinel checkout; null when hosted (the server's own path is useless to the user). */
+  appDir: string | null;
+  /** Public URL when hosted, so plan links the agent returns point at the deployment. */
+  appUrl: string | null;
   projectName: string;
 }) {
   const [tab, setTab] = useState<TabId>("claude");
@@ -53,14 +58,17 @@ export function ConnectAgentModal({
   const [error, setError] = useState<string | null>(null);
 
   const tok = token ?? PLACEHOLDER;
-  const tsx = `${appDir}/node_modules/tsx/dist/cli.mjs`;
-  const entry = `${appDir}/mcp-server/index.ts`;
-  const config = JSON.stringify(
-    { mcpServers: { "sentinel": { command: "node", args: [tsx, entry], env: { SENTINEL_TOKEN: tok } } } },
-    null,
-    2,
-  );
-  const cli = `claude mcp add sentinel -e SENTINEL_TOKEN=${tok} -- node ${tsx} ${entry}`;
+  const dir = appDir ?? DIR_PLACEHOLDER;
+  const tsx = `${dir}/node_modules/tsx/dist/cli.mjs`;
+  const entry = `${dir}/mcp-server/index.ts`;
+  const env: Record<string, string> = { SENTINEL_TOKEN: tok, ...(appUrl ? { SENTINEL_URL: appUrl } : {}) };
+  const config = JSON.stringify({ mcpServers: { sentinel: { command: "node", args: [tsx, entry], env } } }, null, 2);
+  const cli =
+    `claude mcp add sentinel ` +
+    Object.entries(env)
+      .map(([k, v]) => `-e ${k}=${v} `)
+      .join("") +
+    `-- node ${tsx} ${entry}`;
   const prompt = examplePrompt(projectName);
 
   const generate = async () => {
@@ -116,6 +124,14 @@ export function ConnectAgentModal({
 
         <div>
           <div className={`${smallLabel} mb-2`}>2 · Add the server</div>
+          {!appDir && (
+            <p className="mb-3">
+              The MCP server runs on your computer from a local copy of Sentinel (with{" "}
+              <InlineCode>npm install</InlineCode> done and the same <InlineCode>DATABASE_URL</InlineCode> in its{" "}
+              <InlineCode>.env</InlineCode>). Replace <InlineCode>{DIR_PLACEHOLDER}</InlineCode> with that folder, e.g.{" "}
+              <InlineCode>D:/Projects/sentinel</InlineCode>.
+            </p>
+          )}
           <div role="tablist" aria-label="Agent" className="mb-3 flex gap-4 border-b border-line">
             {TABS.map((t) => (
               <button

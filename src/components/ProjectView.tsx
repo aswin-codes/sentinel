@@ -20,10 +20,12 @@ export function ProjectView({
   project: initialProject,
   plans,
   appDir,
+  appUrl,
 }: {
   project: ProjectDTO;
   plans: PlanListItem[];
-  appDir: string;
+  appDir: string | null;
+  appUrl: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -205,6 +207,7 @@ export function ProjectView({
         open={connectOpen}
         onClose={() => setConnectOpen(false)}
         appDir={appDir}
+        appUrl={appUrl}
         projectName={project.name}
       />
       <ProjectFormModal

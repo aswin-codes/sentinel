@@ -67,6 +67,8 @@ Optional: set `SENTINEL_URL` (default `http://localhost:3000`) if the web UI run
 
 The PostgreSQL database must be reachable from the MCP server. The Next.js server only needs to be running when someone opens the plan URLs.
 
+**Using a hosted deployment (e.g. Vercel).** The MCP server still runs on *your* machine, never on the host. You need a local clone with `npm install` done and a `.env` whose `DATABASE_URL` points at the same database as the deployment. The Connect agent dialog on a hosted site shows `<path-to-sentinel>` for you to replace with that clone's path, and it presets `SENTINEL_URL` to the site's address. Never copy server paths such as `/var/task/...` into an MCP config. They exist only on the host, and the agent will report `CONNECTION_CLOSED`. To prefill the path in the dialog, set `SENTINEL_LOCAL_DIR` on the deployment.
+
 ### Claude Code
 
 ```bash
