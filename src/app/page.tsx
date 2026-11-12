@@ -4,6 +4,7 @@ import { ArrowDown } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { btnGhost, btnPrimary, btnSecondary } from "@/components/ui";
 import { LiveDemo } from "@/components/landing/LiveDemo";
+import { GitHubMark, GitHubStar, REPO_URL } from "@/components/landing/GitHubStar";
 import { getCurrentUser } from "@/lib/session";
 
 const HOW = [
@@ -53,6 +54,9 @@ export default async function Home() {
       <header className="mx-auto flex h-14 w-full max-w-[1100px] items-center justify-between px-4 sm:px-6">
         <Logo />
         <nav className="flex items-center gap-1">
+          <span className="mr-1">
+            <GitHubStar />
+          </span>
           <Link href="/sign-in" className={btnGhost}>
             Sign in
           </Link>
@@ -82,7 +86,13 @@ export default async function Home() {
               <ArrowDown className="size-3.5" aria-hidden />
             </a>
           </div>
-          <p className="mt-4 text-[12.5px] text-subtle">Free and open source · self-hosted on your own Postgres</p>
+          <p className="mt-4 text-[12.5px] text-subtle">
+            Free and{" "}
+            <a href={REPO_URL} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-fg">
+              open source
+            </a>{" "}
+            · self-hosted on your own Postgres
+          </p>
         </section>
 
         {/* Live demo */}
@@ -181,7 +191,15 @@ export default async function Home() {
       <footer className="border-t border-line">
         <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-2 px-4 py-6 text-[12px] text-subtle sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <span>Sentinel · test plans for AI coding agents</span>
-          <span>Free, open source, self-hosted</span>
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 hover:text-fg"
+          >
+            <GitHubMark className="size-3.5" />
+            aswin-codes/sentinel
+          </a>
         </div>
       </footer>
     </div>
