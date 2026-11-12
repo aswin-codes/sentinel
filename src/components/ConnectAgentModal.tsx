@@ -6,7 +6,7 @@ import { api, errMsg } from "./api";
 import { CopyButton } from "./CopyButton";
 import { InlineCode } from "./InlineCode";
 import { Modal } from "./Modal";
-import type { CreatedToken } from "./types";
+import type { CreatedToken, McpSetup } from "./types";
 import { btnSecondary, smallLabel } from "./ui";
 
 type TabId = "claude" | "cursor" | "antigravity";
@@ -18,7 +18,34 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 const PLACEHOLDER = "snt_YOUR_TOKEN";
-const DIR_PLACEHOLDER = "<path-to-sentinel>";
+
+type Snippets = { cli: string; claudeJson: string; cursorJson: string; antigravityJson: string };
+const json = (servers: Record<string, unknown>) => JSON.stringify({ mcpServers: { sentinel: servers } }, null, 2);
+
+/** Hosted: nothing to install — the agent talks to <origin>/api/mcp over HTTP with the token. */
+function cloudSnippets(appUrl: string, tok: string): Snippets {
+  const url = `${appUrl.replace(/\/$/, "")}/api/mcp`;
+  const headers = { Authorization: `Bearer ${tok}` };
+  return {
+    cli: `claude mcp add --transport http sentinel ${url} --header "Authorization: Bearer ${tok}"`,
+    claudeJson: json({ type: "http", url, headers }),
+    cursorJson: json({ url, headers }),
+    antigravityJson: json({ serverUrl: url, headers }),
+  };
+}
+
+/** Local: the agent starts the stdio server from this checkout (can also read git itself). */
+function localSnippets(appDir: string, tok: string): Snippets {
+  const tsx = `${appDir}/node_modules/tsx/dist/cli.mjs`;
+  const entry = `${appDir}/mcp-server/index.ts`;
+  const config = json({ command: "node", args: [tsx, entry], env: { SENTINEL_TOKEN: tok } });
+  return {
+    cli: `claude mcp add sentinel -e SENTINEL_TOKEN=${tok} -- node ${tsx} ${entry}`,
+    claudeJson: config,
+    cursorJson: config,
+    antigravityJson: config,
+  };
+}
 
 export const examplePrompt = (projectName: string) =>
   `Inspect my recent changes in ${projectName} and create a QA test plan for them in Sentinel.`;
@@ -40,16 +67,13 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
 export function ConnectAgentModal({
   open,
   onClose,
-  appDir,
-  appUrl,
+  mcp,
   projectName,
 }: {
   open: boolean;
   onClose: () => void;
-  /** Local Sentinel checkout; null when hosted (the server's own path is useless to the user). */
-  appDir: string | null;
-  /** Public URL when hosted, so plan links the agent returns point at the deployment. */
-  appUrl: string | null;
+  /** cloud → hosted HTTP endpoint (<origin>/api/mcp); local → stdio server from this checkout. */
+  mcp: McpSetup;
   projectName: string;
 }) {
   const [tab, setTab] = useState<TabId>("claude");
@@ -58,17 +82,7 @@ export function ConnectAgentModal({
   const [error, setError] = useState<string | null>(null);
 
   const tok = token ?? PLACEHOLDER;
-  const dir = appDir ?? DIR_PLACEHOLDER;
-  const tsx = `${dir}/node_modules/tsx/dist/cli.mjs`;
-  const entry = `${dir}/mcp-server/index.ts`;
-  const env: Record<string, string> = { SENTINEL_TOKEN: tok, ...(appUrl ? { SENTINEL_URL: appUrl } : {}) };
-  const config = JSON.stringify({ mcpServers: { sentinel: { command: "node", args: [tsx, entry], env } } }, null, 2);
-  const cli =
-    `claude mcp add sentinel ` +
-    Object.entries(env)
-      .map(([k, v]) => `-e ${k}=${v} `)
-      .join("") +
-    `-- node ${tsx} ${entry}`;
+  const snippets = mcp.mode === "cloud" ? cloudSnippets(mcp.appUrl, tok) : localSnippets(mcp.appDir, tok);
   const prompt = examplePrompt(projectName);
 
   const generate = async () => {
@@ -124,14 +138,11 @@ export function ConnectAgentModal({
 
         <div>
           <div className={`${smallLabel} mb-2`}>2 · Add the server</div>
-          {!appDir && (
-            <p className="mb-3">
-              The MCP server runs on your computer from a local copy of Sentinel (with{" "}
-              <InlineCode>npm install</InlineCode> done and the same <InlineCode>DATABASE_URL</InlineCode> in its{" "}
-              <InlineCode>.env</InlineCode>). Replace <InlineCode>{DIR_PLACEHOLDER}</InlineCode> with that folder, e.g.{" "}
-              <InlineCode>D:/Projects/sentinel</InlineCode>.
-            </p>
-          )}
+          <p className="mb-3">
+            {mcp.mode === "cloud"
+              ? "Connects to Sentinel's hosted MCP server — nothing to install."
+              : "Runs Sentinel's MCP server from this local copy of the app."}
+          </p>
           <div role="tablist" aria-label="Agent" className="mb-3 flex gap-4 border-b border-line">
             {TABS.map((t) => (
               <button
@@ -153,12 +164,12 @@ export function ConnectAgentModal({
             {tab === "claude" && (
               <>
                 <p>Run this in your project&apos;s terminal:</p>
-                <CodeBlock label="Terminal" code={cli} />
+                <CodeBlock label="Terminal" code={snippets.cli} />
                 <p>
                   Or add it to <InlineCode>.mcp.json</InlineCode> (project) or <InlineCode>~/.claude.json</InlineCode>{" "}
                   (all projects):
                 </p>
-                <CodeBlock label=".mcp.json" code={config} />
+                <CodeBlock label=".mcp.json" code={snippets.claudeJson} />
               </>
             )}
             {tab === "cursor" && (
@@ -168,7 +179,7 @@ export function ConnectAgentModal({
                   <InlineCode>~/.cursor/mcp.json</InlineCode>), then enable <span className="text-fg">sentinel</span> in
                   Settings → MCP.
                 </p>
-                <CodeBlock label=".cursor/mcp.json" code={config} />
+                <CodeBlock label=".cursor/mcp.json" code={snippets.cursorJson} />
               </>
             )}
             {tab === "antigravity" && (
@@ -177,7 +188,7 @@ export function ConnectAgentModal({
                   Agent panel menu → MCP Servers → Manage → View raw config, then merge this into{" "}
                   <InlineCode>mcp_config.json</InlineCode>:
                 </p>
-                <CodeBlock label="mcp_config.json" code={config} />
+                <CodeBlock label="mcp_config.json" code={snippets.antigravityJson} />
               </>
             )}
           </div>

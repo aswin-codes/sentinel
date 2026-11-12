@@ -37,3 +37,8 @@ export type ApiTokenInfo = {
 export type CreatedToken = { id: number; name: string; prefix: string; createdAt: string; token: string };
 
 export type Filter = "all" | "not_run" | "fail";
+
+/** How the Connect-agent dialog tells agents to connect (decided server-side). */
+export type McpSetup =
+  | { mode: "cloud"; appUrl: string }
+  | { mode: "local"; appUrl: string; appDir: string };

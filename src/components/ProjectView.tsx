@@ -13,19 +13,17 @@ import { ProgressBar } from "./Progress";
 import { ProjectFormModal } from "./ProjectFormModal";
 import { relativeTime } from "./time";
 import { useToast } from "./Toast";
-import type { GitInfo, PlanListItem, ProjectDTO } from "./types";
+import type { GitInfo, McpSetup, PlanListItem, ProjectDTO } from "./types";
 import { btnGhost, btnSecondary } from "./ui";
 
 export function ProjectView({
   project: initialProject,
   plans,
-  appDir,
-  appUrl,
+  mcp,
 }: {
   project: ProjectDTO;
   plans: PlanListItem[];
-  appDir: string | null;
-  appUrl: string | null;
+  mcp: McpSetup;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -206,8 +204,7 @@ export function ProjectView({
       <ConnectAgentModal
         open={connectOpen}
         onClose={() => setConnectOpen(false)}
-        appDir={appDir}
-        appUrl={appUrl}
+        mcp={mcp}
         projectName={project.name}
       />
       <ProjectFormModal

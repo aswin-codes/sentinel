@@ -57,17 +57,31 @@ No other Clerk env vars are needed: the sign-in and sign-up URLs, and the redire
 
 ## MCP setup
 
-The server is a stdio process: `mcp-server/index.ts`, run with `tsx`. It loads `.env` from the repo root itself, so it works from any working directory. Calling `node` on tsx's CLI directly avoids depending on `npx` and the shell's `PATH`.
+The easiest way: open a project in Sentinel, click **Connect agent**, then **Generate token**, and copy the snippet. The dialog picks the right kind of connection automatically:
 
-It **requires** the `SENTINEL_TOKEN` env var. At startup it resolves the token to your account, and every tool is scoped to that account. With a missing or revoked token it prints an explanation to stderr and exits.
+| Where Sentinel runs | Connection | What the agent needs |
+|---|---|---|
+| **Hosted** (Vercel, or `SENTINEL_HOSTED=1`) | **Cloud**: Streamable HTTP at `https://<your-site>/api/mcp` | Just the URL + `Authorization: Bearer snt_...`. Nothing to install. |
+| **Local** (`npm run dev`) | **Local**: stdio process `mcp-server/index.ts` from this checkout | The checkout's path + `SENTINEL_TOKEN`. |
 
-> In the examples below, replace `<ABS>` with the absolute path to your clone (for example `D:/Projects/TestCaseManager`; forward slashes work on Windows) and `snt_...` with your token.
+Both connections offer the same tools and are scoped to the token's account. The local server can also read git itself (`inspect_repo_changes`). With the cloud server, the agent runs `git diff` in its own terminal, because the host can't see your repo.
 
-Optional: set `SENTINEL_URL` (default `http://localhost:3000`) if the web UI runs elsewhere. It is used for the plan links the tools return.
+**Cloud (hosted) examples**, replacing the URL and token with yours:
 
-The PostgreSQL database must be reachable from the MCP server. The Next.js server only needs to be running when someone opens the plan URLs.
+```bash
+claude mcp add --transport http sentinel https://sentinel-qahub.vercel.app/api/mcp --header "Authorization: Bearer snt_..."
+```
 
-**Using a hosted deployment (e.g. Vercel).** The MCP server still runs on *your* machine, never on the host. You need a local clone with `npm install` done and a `.env` whose `DATABASE_URL` points at the same database as the deployment. The Connect agent dialog on a hosted site shows `<path-to-sentinel>` for you to replace with that clone's path, and it presets `SENTINEL_URL` to the site's address. Never copy server paths such as `/var/task/...` into an MCP config. They exist only on the host, and the agent will report `CONNECTION_CLOSED`. To prefill the path in the dialog, set `SENTINEL_LOCAL_DIR` on the deployment.
+```json
+{ "mcpServers": { "sentinel": { "type": "http", "url": "https://sentinel-qahub.vercel.app/api/mcp",
+  "headers": { "Authorization": "Bearer snt_..." } } } }
+```
+
+Cursor uses the same JSON without `"type"`. Antigravity uses `"serverUrl"` in place of `"url"`.
+
+**Local examples.** The stdio server is `mcp-server/index.ts`, run with `tsx`. It loads `.env` from the repo root itself, so it works from any working directory. It **requires** `SENTINEL_TOKEN`. With a missing or revoked token it prints an explanation to stderr and exits. Optional: `SENTINEL_URL` (default `http://localhost:3000`) is used for the plan links the tools return.
+
+> Below, replace `<ABS>` with the absolute path to your clone (for example `D:/Projects/TestCaseManager`; forward slashes work on Windows) and `snt_...` with your token.
 
 ### Claude Code
 

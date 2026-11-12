@@ -39,7 +39,9 @@ src/
     (app)/settings/page.tsx                   Profile + API tokens
     api/**                                    Route handlers (thin: auth → validate → lib → JSON)
   components/**         UI components
-mcp-server/index.ts     Stdio MCP server; requires SENTINEL_TOKEN env; relative imports only
+src/lib/mcp.ts          SHARED MCP tool registry: createSentinelMcpServer({user, appUrl, mode: local|remote})
+src/app/api/mcp/route.ts Hosted MCP (Streamable HTTP, stateless, Bearer snt_ token); mode remote (no git tool)
+mcp-server/index.ts     Local stdio MCP server (SENTINEL_TOKEN env); mode local; relative imports only
 ```
 **Rule:** `src/lib/*` (except `session.ts`) and `src/db/*` use relative imports (no `@/`) so `tsx` can run the MCP server. App code may use `@/`.
 **Rule:** every data access is scoped to the signed-in user via the `assert*Owner` guards. Foreign ids → 404 (never 403, don't leak existence).
