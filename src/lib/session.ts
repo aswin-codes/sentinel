@@ -5,6 +5,7 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import {
   UnauthorizedError,
+  isApiToken,
   getUserByApiToken,
   getUserByClerkId,
   upsertClerkUser,
@@ -44,11 +45,11 @@ export async function requireUser(): Promise<PublicUser> {
   return user;
 }
 
-/** For route handlers: `Authorization: Bearer qah_...` OR Clerk session. Throws UnauthorizedError. */
+/** For route handlers: `Authorization: Bearer snt_...` OR Clerk session. Throws UnauthorizedError. */
 export async function requireRequestUser(req: Request): Promise<PublicUser> {
   const header = req.headers.get("authorization");
   const bearer = header?.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : null;
-  if (bearer?.startsWith("qah_")) {
+  if (bearer && isApiToken(bearer)) {
     const user = await getUserByApiToken(bearer);
     if (user) return user;
     throw new UnauthorizedError("Invalid API token.");

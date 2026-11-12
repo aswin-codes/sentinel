@@ -1,4 +1,4 @@
-# QA Hub — AI Test Plan & Checklist Manager
+# Sentinel — AI Test Plan & Checklist Manager
 
 Self-hostable, multi-user SaaS-style Next.js app. Users sign up, create projects, and AI coding agents
 (Claude Code, Cursor, Antigravity) create/update feature test plans for those projects via MCP or REST
@@ -13,7 +13,7 @@ no demo/seed data anywhere.
 - Auth (humans): **Clerk** (`@clerk/nextjs` v7). Sign-in methods = Google + email (one-time code) only (free tier, no SMS), configured in the
   Clerk dashboard (not in code). Keys `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` in `.env`/`.env.local` (required in v7;
   for dev, `npx clerk@latest init` writes temporary keyless keys). Local `users` row (keyed by `clerk_user_id`) is created lazily on first request — no webhooks.
-- Auth (agents): personal API tokens `qah_...` (sha256 stored, shown once) — never Clerk.
+- Auth (agents): personal API tokens `snt_...` (sha256 stored, shown once) — never Clerk.
 
 ## Folder structure
 ```
@@ -23,7 +23,7 @@ src/
   lib/auth.ts           SHARED auth core (no Clerk imports): PublicUser, upsertClerkUser, getUserByClerkId, API tokens,
                         assertProjectOwner/assertPlanOwner/assertRunOwner, UnauthorizedError, ConflictError
   lib/session.ts        Next-only (Clerk): getCurrentUser (auth() → local user, lazy sync), syncCurrentUser,
-                        requireUser (pages → redirect /sign-in), requireRequestUser(req) (Bearer qah_ token OR Clerk session)
+                        requireUser (pages → redirect /sign-in), requireRequestUser(req) (Bearer snt_ token OR Clerk session)
   lib/plans.ts          SHARED plan service: zod input schemas, getPlanFull, upsertPlan, listPlans, setResult, ...
   lib/git.ts            SHARED: getGitInfo / getGitDiff (execFile, no shell)
   lib/api.ts            Route-handler helpers (ok/fail/handle/parseId/readJson)
@@ -39,7 +39,7 @@ src/
     (app)/settings/page.tsx                   Profile + API tokens
     api/**                                    Route handlers (thin: auth → validate → lib → JSON)
   components/**         UI components
-mcp-server/index.ts     Stdio MCP server; requires QA_HUB_TOKEN env; relative imports only
+mcp-server/index.ts     Stdio MCP server; requires SENTINEL_TOKEN env; relative imports only
 ```
 **Rule:** `src/lib/*` (except `session.ts`) and `src/db/*` use relative imports (no `@/`) so `tsx` can run the MCP server. App code may use `@/`.
 **Rule:** every data access is scoped to the signed-in user via the `assert*Owner` guards. Foreign ids → 404 (never 403, don't leak existence).
@@ -54,7 +54,7 @@ mcp-server/index.ts     Stdio MCP server; requires QA_HUB_TOKEN env; relative im
 - Schema changes: edit `schema.ts`, then `npm run db:push`.
 
 ## REST API contract
-All JSON. Errors: `{ error: string, details?: unknown }`. Auth: Clerk session (browser) or `Authorization: Bearer qah_...`.
+All JSON. Errors: `{ error: string, details?: unknown }`. Auth: Clerk session (browser) or `Authorization: Bearer snt_...`.
 Unauthenticated → 401. Not owned / missing → 404. Validation → 400. Duplicate → 409.
 | Method | Path | Body / Query | Returns |
 |---|---|---|---|
@@ -80,8 +80,8 @@ Unauthenticated → 401. Not owned / missing → 404. Validation → 400. Duplic
 Types (`PlanFull`, `SectionFull`, `CaseWithResult`, `RunSummary`, `PlanListItem`, `PublicUser`) come from `src/lib/plans.ts` / `src/lib/auth.ts` — client components import them with `import type` only.
 
 ## MCP
-Config: `{"mcpServers":{"qa-hub":{"command":"node","args":["<appDir>/node_modules/tsx/dist/cli.mjs","<appDir>/mcp-server/index.ts"],"env":{"QA_HUB_TOKEN":"qah_..."}}}}`.
-Server resolves the user from `QA_HUB_TOKEN` at startup; every tool is scoped to that user.
+Config: `{"mcpServers":{"sentinel":{"command":"node","args":["<appDir>/node_modules/tsx/dist/cli.mjs","<appDir>/mcp-server/index.ts"],"env":{"SENTINEL_TOKEN":"snt_..."}}}}`.
+Server resolves the user from `SENTINEL_TOKEN` at startup; every tool is scoped to that user.
 Tools: list_projects, create_project, inspect_repo_changes, upsert_test_plan, get_test_plan, get_failed_test_cases.
 
 ## UI design — minimal
@@ -95,4 +95,4 @@ Geist Mono only for case codes and inline code. 8px radius cards, 6px buttons. M
 ## Commands
 - `npm run dev` · `npm run build` · `npx tsc --noEmit` · `npm run lint`
 - `npm run db:push`
-- `npm run mcp` (stdio MCP server; needs `QA_HUB_TOKEN`)
+- `npm run mcp` (stdio MCP server; needs `SENTINEL_TOKEN`)

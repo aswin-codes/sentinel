@@ -89,7 +89,7 @@ export function SettingsView({ user, tokens: initialTokens }: { user: PublicUser
         <div>
           <h2 className="text-[14px] font-medium">API tokens</h2>
           <p className="mt-1 text-[13px] leading-relaxed text-muted">
-            Coding agents use a token to reach QA Hub through MCP or the REST API. Tokens act as you.
+            Coding agents use a token to reach Sentinel through MCP or the REST API. Tokens act as you.
           </p>
         </div>
         <div className="min-w-0 space-y-5">
@@ -163,7 +163,7 @@ export function SettingsView({ user, tokens: initialTokens }: { user: PublicUser
         onClose={() => setToRevoke(null)}
         title="Revoke token?"
         description={
-          toRevoke ? `Agents using “${toRevoke.name}” will immediately lose access to QA Hub.` : undefined
+          toRevoke ? `Agents using “${toRevoke.name}” will immediately lose access to Sentinel.` : undefined
         }
         confirmLabel="Revoke token"
         danger

@@ -1,5 +1,5 @@
 /**
- * QA Hub — stdio MCP server.
+ * Sentinel — stdio MCP server.
  *
  * Lets AI coding agents inspect repo changes, create/update QA test plans, and read
  * back the cases a human marked as failed. Reuses the shared service in ../src/lib.
@@ -14,9 +14,9 @@ import path from "node:path";
 const envPath = path.resolve(__dirname, "../.env");
 if (fs.existsSync(envPath)) process.loadEnvFile(envPath);
 
-const log = (...args: unknown[]) => console.error("[qa-hub-mcp]", ...args);
+const log = (...args: unknown[]) => console.error("[sentinel-mcp]", ...args);
 
-const APP_URL = (process.env.QA_HUB_URL ?? "http://localhost:3000").replace(/\/$/, "");
+const APP_URL = (process.env.SENTINEL_URL ?? process.env.QA_HUB_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
 async function main() {
   const { McpServer } = await import("@modelcontextprotocol/sdk/server/mcp.js");
@@ -30,21 +30,21 @@ async function main() {
   const { getGitInfo, getGitDiff } = await import("../src/lib/git");
   const { getUserByApiToken, assertProjectOwner, assertPlanOwner } = await import("../src/lib/auth");
 
-  // 2) Resolve the user from QA_HUB_TOKEN. Fail fast — every tool is scoped to this user.
+  // 2) Resolve the user from SENTINEL_TOKEN. Fail fast — every tool is scoped to this user.
   const tokenHelp =
-    `Create a personal API token in QA Hub (${APP_URL}/settings → API tokens → Create token) and pass it to this ` +
-    'server as the QA_HUB_TOKEN env var, e.g. `claude mcp add qa-hub -e QA_HUB_TOKEN=qah_... -- node ' +
-    '<appDir>/node_modules/tsx/dist/cli.mjs <appDir>/mcp-server/index.ts`, or "env": {"QA_HUB_TOKEN": "qah_..."} ' +
+    `Create a personal API token in Sentinel (${APP_URL}/settings → API tokens → Create token) and pass it to this ` +
+    'server as the SENTINEL_TOKEN env var, e.g. `claude mcp add sentinel -e SENTINEL_TOKEN=snt_... -- node ' +
+    '<appDir>/node_modules/tsx/dist/cli.mjs <appDir>/mcp-server/index.ts`, or "env": {"SENTINEL_TOKEN": "snt_..."} ' +
     "in your MCP config.";
-  const rawToken = process.env.QA_HUB_TOKEN?.trim();
+  const rawToken = (process.env.SENTINEL_TOKEN ?? process.env.QA_HUB_TOKEN)?.trim();
   if (!rawToken) {
-    log(`QA_HUB_TOKEN is not set. ${tokenHelp}`);
+    log(`SENTINEL_TOKEN is not set. ${tokenHelp}`);
     await pool.end().catch(() => {});
     process.exit(1);
   }
   const user = await getUserByApiToken(rawToken);
   if (!user) {
-    log(`QA_HUB_TOKEN is invalid or has been revoked. ${tokenHelp}`);
+    log(`SENTINEL_TOKEN is invalid or has been revoked. ${tokenHelp}`);
     await pool.end().catch(() => {});
     process.exit(1);
   }
@@ -81,10 +81,10 @@ async function main() {
   const projectUrl = (projectId: number) => `${APP_URL}/projects/${projectId}`;
 
   const server = new McpServer(
-    { name: "qa-hub", version: "0.2.0" },
+    { name: "sentinel", version: "0.2.0" },
     {
       instructions:
-        `QA Hub stores manual QA test plans for software projects. You are signed in as ${userLabel}; ` +
+        `Sentinel stores manual QA test plans for software projects. You are signed in as ${userLabel}; ` +
         "every tool only sees this user's projects and plans. Typical workflow: " +
         "list_projects (match repoPath to your current working directory) → if no project matches, create_project " +
         "(pass your current working directory as repoPath) → inspect_repo_changes (see what changed) → " +
@@ -100,7 +100,7 @@ async function main() {
     {
       title: "List projects and their test plans",
       description:
-        "List your QA Hub projects (id, name, description, repoPath) together with their test plans " +
+        "List your Sentinel projects (id, name, description, repoPath) together with their test plans " +
         "(id, title, status, updatedAt, url). Call this first to find the projectId for the repo you are working in " +
         "(match repoPath against your current working directory) and to see whether a plan for the feature already " +
         "exists, so you update it instead of creating a duplicate. If no project matches, call create_project.",
@@ -148,9 +148,9 @@ async function main() {
   server.registerTool(
     "create_project",
     {
-      title: "Create a QA Hub project",
+      title: "Create a Sentinel project",
       description:
-        "Create a new QA Hub project for the repository you are working in. Use this when list_projects has no " +
+        "Create a new Sentinel project for the repository you are working in. Use this when list_projects has no " +
         "project matching your repo (compare repoPath with your current working directory). Pass your CURRENT " +
         "WORKING DIRECTORY (absolute path of the repo root) as repoPath so inspect_repo_changes can read its git " +
         "state. Returns the project (id, name, description, repoPath, url); use its id for upsert_test_plan.",
@@ -209,7 +209,7 @@ async function main() {
       if (!project) return fail(`Project ${projectId} not found. Call list_projects to see valid ids.`);
       if (!project.repoPath)
         return fail(
-          `Project ${projectId} (${project.name}) has no repoPath configured; set one in the QA Hub UI (${projectUrl(projectId)}).`,
+          `Project ${projectId} (${project.name}) has no repoPath configured; set one in the Sentinel UI (${projectUrl(projectId)}).`,
         );
       const [info, diff] = await Promise.all([
         getGitInfo(project.repoPath),
@@ -236,7 +236,7 @@ async function main() {
       title: "Create or update a QA test plan",
       description: [
         "Create a manual QA test plan (checklist) for a feature, or update an existing one. A human tester then executes",
-        "it in the QA Hub web UI, marking each case Pass/Fail with notes.",
+        "it in the Sentinel web UI, marking each case Pass/Fail with notes.",
         "",
         "MATCHING (no duplicates): the plan is matched by `planId` if given, otherwise by (projectId, planTitle). Re-calling",
         "with the same title updates the same plan. Call get_test_plan first when updating, so you keep the existing codes.",
@@ -289,7 +289,7 @@ async function main() {
       description:
         "Return the cases a human tester marked FAIL in a test plan run (default: the latest run), including the " +
         "tester's notes, the original steps/expected results and each case's agentPrompt. USE THIS when the user asks " +
-        'you to debug / fix failed QA checks (e.g. "fix the failing tests in QA Hub"). Read the notes carefully — they ' +
+        'you to debug / fix failed QA checks (e.g. "fix the failing tests in Sentinel"). Read the notes carefully — they ' +
         "describe what actually happened. After fixing, tell the user which cases to re-test.",
       inputSchema: {
         planId: z.number().int().positive().describe("Test plan id (see list_projects)"),

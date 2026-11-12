@@ -15,7 +15,7 @@ const TYPE_MS = 28;
 type LineKind = "prompt" | "tool" | "out" | "text" | "edit" | "ok" | "failcase" | "note";
 type Line = { at: number; kind: LineKind; text: string; code?: string };
 
-const PROMPT_1 = "Inspect my recent changes and create a QA test plan in QA Hub";
+const PROMPT_1 = "Inspect my recent changes and create a QA test plan in Sentinel";
 const PROMPT_3 = "Fix the failed QA checks";
 
 const STEP1_LINES: Line[] = [
@@ -25,7 +25,7 @@ const STEP1_LINES: Line[] = [
   { at: 4000, kind: "text", text: "New applyCoupon() and a coupon field on /checkout. Writing a plan for the flow." },
   { at: 5000, kind: "tool", text: "upsert_test_plan" },
   { at: 7900, kind: "out", text: `Created "${PLAN_TITLE}" · 2 sections · 5 cases` },
-  { at: 8600, kind: "text", text: "The plan is in QA Hub. Run through it and mark anything that fails." },
+  { at: 8600, kind: "text", text: "The plan is in Sentinel. Run through it and mark anything that fails." },
 ];
 const STEP1_END = 11000;
 /** When the plan header and each section/case row appears in step 1. */
@@ -378,7 +378,7 @@ function Terminal({ lines, time, idle }: { lines: Line[]; time: number; idle: bo
     <div className="flex h-[260px] flex-col border-b border-line bg-surface sm:h-[300px] lg:h-auto lg:border-b-0 lg:border-r">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-4 font-mono text-[11.5px] text-subtle">
         <span>claude · ~/shop</span>
-        <span>mcp: qa-hub</span>
+        <span>mcp: sentinel</span>
       </div>
       <div className="relative min-h-0 flex-1">
         <div
@@ -422,7 +422,7 @@ function TermLine({ line }: { line: Line }) {
         <div className={`${base} mt-3 flex gap-2`}>
           <span className="text-fg">●</span>
           <span className="min-w-0">
-            <span className="text-muted">qa-hub · </span>
+            <span className="text-muted">sentinel · </span>
             <span className="text-fg">{line.text}</span>
           </span>
         </div>

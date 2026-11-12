@@ -1,4 +1,4 @@
-/** Tiny client-side fetch helper for the QA Hub REST API. */
+/** Tiny client-side fetch helper for the Sentinel REST API. */
 
 export type FieldErrors = Record<string, string>;
 

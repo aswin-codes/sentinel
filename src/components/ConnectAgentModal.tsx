@@ -17,10 +17,10 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "antigravity", label: "Antigravity" },
 ];
 
-const PLACEHOLDER = "qah_YOUR_TOKEN";
+const PLACEHOLDER = "snt_YOUR_TOKEN";
 
 export const examplePrompt = (projectName: string) =>
-  `Inspect my recent changes in ${projectName} and create a QA test plan for them in QA Hub.`;
+  `Inspect my recent changes in ${projectName} and create a QA test plan for them in Sentinel.`;
 
 function CodeBlock({ code, label }: { code: string; label: string }) {
   return (
@@ -56,11 +56,11 @@ export function ConnectAgentModal({
   const tsx = `${appDir}/node_modules/tsx/dist/cli.mjs`;
   const entry = `${appDir}/mcp-server/index.ts`;
   const config = JSON.stringify(
-    { mcpServers: { "qa-hub": { command: "node", args: [tsx, entry], env: { QA_HUB_TOKEN: tok } } } },
+    { mcpServers: { "sentinel": { command: "node", args: [tsx, entry], env: { SENTINEL_TOKEN: tok } } } },
     null,
     2,
   );
-  const cli = `claude mcp add qa-hub -e QA_HUB_TOKEN=${tok} -- node ${tsx} ${entry}`;
+  const cli = `claude mcp add sentinel -e SENTINEL_TOKEN=${tok} -- node ${tsx} ${entry}`;
   const prompt = examplePrompt(projectName);
 
   const generate = async () => {
@@ -82,7 +82,7 @@ export function ConnectAgentModal({
       open={open}
       onClose={onClose}
       title="Connect an agent"
-      description="Add QA Hub's MCP server to your coding agent so it can write test plans and read failures."
+      description="Add Sentinel's MCP server to your coding agent so it can write test plans and read failures."
       width={640}
     >
       <div className="space-y-5 text-[13px] text-muted">
@@ -149,7 +149,7 @@ export function ConnectAgentModal({
               <>
                 <p>
                   Add this to <InlineCode>.cursor/mcp.json</InlineCode> in your project (or{" "}
-                  <InlineCode>~/.cursor/mcp.json</InlineCode>), then enable <span className="text-fg">qa-hub</span> in
+                  <InlineCode>~/.cursor/mcp.json</InlineCode>), then enable <span className="text-fg">sentinel</span> in
                   Settings → MCP.
                 </p>
                 <CodeBlock label=".cursor/mcp.json" code={config} />

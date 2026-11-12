@@ -10,7 +10,7 @@ const HOW = [
   {
     title: "Connect your agent over MCP",
     body: "Create an API token, paste one config block into Claude Code, Cursor or Antigravity.",
-    code: '"qa-hub": { "command": "node", … }',
+    code: '"sentinel": { "command": "node", … }',
   },
   {
     title: "Agent writes plans from your diffs",
@@ -27,7 +27,7 @@ const HOW = [
 const FAQ = [
   {
     q: "Is it free? Can I self-host it?",
-    a: "Yes. QA Hub is free and open source. Run it yourself with Node and a Postgres database.",
+    a: "Yes. Sentinel is free and open source. Run it yourself with Node and a Postgres database.",
   },
   {
     q: "Where is my data stored?",
@@ -66,10 +66,10 @@ export default async function Home() {
         {/* Hero */}
         <section className="max-w-[700px] pb-14 pt-20 sm:pb-16 sm:pt-28">
           <h1 className="text-[34px] font-semibold leading-[1.1] tracking-[-0.03em] sm:text-[48px]">
-            Your agent writes the feature. QA Hub checks it works.
+            Your agent writes the feature. Sentinel checks it works.
           </h1>
           <p className="mt-5 max-w-[560px] text-[15.5px] leading-relaxed text-muted">
-            Coding agents leave test checklists in chat and stray markdown files. QA Hub gives them a home: the agent
+            Coding agents leave test checklists in chat and stray markdown files. Sentinel gives them a home: the agent
             writes a test plan from your diff, you run it as a Pass/Fail checklist, and the failures go straight back
             to the agent to fix.
           </p>
@@ -180,7 +180,7 @@ export default async function Home() {
 
       <footer className="border-t border-line">
         <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-2 px-4 py-6 text-[12px] text-subtle sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <span>QA Hub · test plans for AI coding agents</span>
+          <span>Sentinel · test plans for AI coding agents</span>
           <span>Free, open source, self-hosted</span>
         </div>
       </footer>

@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { default: "QA Hub", template: "%s · QA Hub" },
+  title: { default: "Sentinel", template: "%s · Sentinel" },
   description: "AI agents write the QA test plans; you run them as Pass/Fail checklists.",
 };
 

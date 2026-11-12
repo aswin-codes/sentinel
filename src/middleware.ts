@@ -3,7 +3,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 /**
  * Clerk runs on every page and API route so `auth()` works server-side.
  * Only app pages are protected here (signed out → Clerk sign-in). API routes are NOT protected by
- * middleware: they also accept `Authorization: Bearer qah_...` and do their own check (requireRequestUser).
+ * middleware: they also accept `Authorization: Bearer snt_...` and do their own check (requireRequestUser).
  */
 const isProtectedPage = createRouteMatcher(["/projects(.*)", "/settings(.*)"]);
 

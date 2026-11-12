@@ -9,7 +9,10 @@ import { db } from "../db";
 import { apiTokens, projects, testPlans, testRuns, users } from "../db/schema";
 import { NotFoundError } from "./plans";
 
-export const API_TOKEN_PREFIX = "qah_";
+export const API_TOKEN_PREFIX = "snt_";
+/** Prefixes accepted when verifying (qah_ = tokens issued before the rename to Sentinel). */
+export const API_TOKEN_PREFIXES = ["snt_", "qah_"] as const;
+export const isApiToken = (t: string) => API_TOKEN_PREFIXES.some((p) => t.startsWith(p));
 
 export type PublicUser = {
   id: number;
@@ -117,7 +120,7 @@ export async function revokeApiToken(userId: number, tokenId: number): Promise<v
 }
 
 export async function getUserByApiToken(token: string | undefined | null): Promise<PublicUser | null> {
-  if (!token || !token.startsWith(API_TOKEN_PREFIX)) return null;
+  if (!token || !isApiToken(token)) return null;
   const [row] = await db
     .select({ tokenId: apiTokens.id, ...publicCols })
     .from(apiTokens)
