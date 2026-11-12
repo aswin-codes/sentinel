@@ -10,12 +10,13 @@ Built with Next.js 15, PostgreSQL (Drizzle ORM), Tailwind CSS v4, and the Model 
 
 - Node.js 20+ (needed for `process.loadEnvFile`)
 - PostgreSQL, with an empty database (for example `createdb qahub`)
+- A [Clerk](https://clerk.com) application for sign-in (optional for local development, see below)
 
 ## Setup
 
 ```bash
 npm install
-cp .env.example .env          # then edit DATABASE_URL
+cp .env.example .env          # then edit DATABASE_URL (+ Clerk keys)
 npm run db:push               # create tables
 npm run dev                   # http://localhost:3000
 ```
@@ -24,11 +25,33 @@ npm run dev                   # http://localhost:3000
 
 ```
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/qahub
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
+CLERK_SECRET_KEY=sk_...
 ```
+
+## Authentication (Clerk)
+
+Sign-in is handled by [Clerk](https://clerk.com). QA Hub allows exactly two sign-in methods: **Google** and **phone number (SMS code)**. The pages are `/sign-in` and `/sign-up`. After signing in you land on `/projects`. The old `/login` and `/signup` URLs redirect to them.
+
+**Local development without a Clerk account (keyless mode).** Run `npx clerk@latest init`. It needs no Clerk account and writes temporary development keys, so you can sign in right away. A "Configure your application" prompt in the browser links to the page where you *claim* the instance. A keyless instance uses Clerk's defaults (email + password + Google). To restrict it to Google and phone, claim it (sign in to Clerk). It then becomes a normal app in your dashboard. Then follow steps 2–4 below. The `@clerk/nextjs` v7 SDK needs the keys present in the environment and won't start without them.
+
+**Set up the Clerk application:**
+
+1. In the [Clerk dashboard](https://dashboard.clerk.com), create an application (or claim the keyless one).
+2. **Configure → User & authentication**:
+   - **Email address**: turn off *Sign-up with email* and *Sign-in with email*, including verification code, verification link and password. Clerk may keep email as an optional profile attribute. It is just not used for sign-in.
+   - **Phone number**: turn on *Sign-up with phone* and *Sign-in with phone*, with **SMS verification code**.
+   - **Username**: off. **Password**: off.
+3. **Configure → SSO connections**: enable **Google** and remove every other provider. Development instances use Clerk's shared Google credentials. For production, enter your own Google OAuth client ID and secret, using the redirect URI Clerk shows.
+4. Under **API keys**, copy the keys into `.env` as `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`, then restart `npm run dev`.
+
+No other Clerk env vars are needed: the sign-in and sign-up URLs, and the redirect after sign-in (`/projects`), are set in code. Development instances send SMS only within a limited quota or to test numbers. Check Clerk's SMS pricing and supported countries before going to production.
+
+**How it maps to QA Hub data.** Clerk owns identities and browser sessions. The first time a Clerk user opens the app, QA Hub creates a local `users` row (Clerk user id, name, email or phone, avatar). That row owns projects, plans and API tokens. Name, photo and sign-in methods are edited through **Settings → Manage account**, which opens Clerk's profile dialog. Agents never touch Clerk. They use personal `qah_...` API tokens.
 
 ## Getting started
 
-1. Open http://localhost:3000/signup and create an account.
+1. Open http://localhost:3000/sign-up and continue with Google or your phone number.
 2. **Create a project.** Give it a name and, ideally, the absolute path of the repo it tests (`repoPath`) so agents can read its git changes. Agents can also create projects themselves with the `create_project` MCP tool.
 3. Go to **Settings → API tokens → Create token**. Copy the `qah_...` token. It is shown only once.
 4. Add the MCP server to your agent with that token (see below), or call the REST API with `Authorization: Bearer qah_...`.
@@ -113,7 +136,7 @@ For example, you can ask your agent:
 
 All endpoints take and return JSON. Errors are returned as `{ error: string, details?: unknown }` with the matching HTTP status.
 
-**Auth:** the browser session cookie, or `Authorization: Bearer qah_...` (an API token from Settings → API tokens). Unauthenticated → 401. Resources that don't exist or belong to another user → 404. Validation errors → 400. Duplicates → 409.
+**Auth:** a signed-in Clerk browser session, or `Authorization: Bearer qah_...` (an API token from Settings → API tokens). Unauthenticated → 401. Resources that don't exist or belong to another user → 404. Validation errors → 400. Duplicates → 409.
 
 ```bash
 curl -H "Authorization: Bearer qah_..." http://localhost:3000/api/projects
@@ -121,10 +144,7 @@ curl -H "Authorization: Bearer qah_..." http://localhost:3000/api/projects
 
 | Method | Path | Body / Query | Returns |
 |---|---|---|---|
-| POST | `/api/auth/signup` | `{name,email,password}` | `{user}` 201 + sets cookie |
-| POST | `/api/auth/login` | `{email,password}` | `{user}` + sets cookie |
-| POST | `/api/auth/logout` | – | `{ok:true}` + clears cookie |
-| GET | `/api/auth/me` | – | `{user}` or 401 |
+| GET | `/api/auth/me` | – | `{user}` `{id,name,email,phone,avatarUrl}` or 401 |
 | GET | `/api/tokens` | – | `ApiTokenInfo[]` `{id,name,prefix,lastUsedAt,createdAt}` |
 | POST | `/api/tokens` | `{name}` | `{id,name,prefix,createdAt,token}` 201 (token shown once) |
 | DELETE | `/api/tokens/[id]` | – | `{ok:true}` |

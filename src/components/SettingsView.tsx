@@ -1,16 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useClerk, useUser } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { api, errMsg } from "./api";
+import { Avatar } from "./Avatar";
 import { CopyButton } from "./CopyButton";
 import { ConfirmModal } from "./Modal";
 import { relativeTime } from "./time";
 import { useToast } from "./Toast";
 import type { ApiTokenInfo, CreatedToken, PublicUser } from "./types";
-import { btnGhost, btnPrimary, input, label } from "./ui";
+import { btnGhost, btnPrimary, btnSecondary, input, label } from "./ui";
 
 export function SettingsView({ user, tokens: initialTokens }: { user: PublicUser; tokens: ApiTokenInfo[] }) {
   const toast = useToast();
+  const router = useRouter();
+  const clerk = useClerk();
+  const { user: clerkUser } = useUser();
+
+  // When the profile is edited in Clerk's modal, re-render the server page (which re-syncs our user row).
+  const seenUpdate = useRef<number | null>(null);
+  const updatedAt = clerkUser?.updatedAt?.getTime() ?? null;
+  useEffect(() => {
+    if (updatedAt === null) return;
+    if (seenUpdate.current !== null && seenUpdate.current !== updatedAt) router.refresh();
+    seenUpdate.current = updatedAt;
+  }, [updatedAt, router]);
+
   const [tokens, setTokens] = useState(initialTokens);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -51,18 +67,22 @@ export function SettingsView({ user, tokens: initialTokens }: { user: PublicUser
       <section className="mt-10 grid gap-6 border-t border-line pt-8 md:grid-cols-[240px_minmax(0,1fr)] md:gap-12">
         <div>
           <h2 className="text-[14px] font-medium">Profile</h2>
-          <p className="mt-1 text-[13px] text-muted">Your account details.</p>
+          <p className="mt-1 text-[13px] leading-relaxed text-muted">Sign-in methods, name and photo are managed by your account.</p>
         </div>
-        <dl className="max-w-[480px] divide-y divide-line rounded-[8px] border border-line">
-          <div className="flex items-center justify-between gap-4 px-4 py-3">
-            <dt className="text-[13px] text-muted">Name</dt>
-            <dd className="min-w-0 truncate text-[13.5px]">{user.name}</dd>
+        <div className="max-w-[480px] rounded-[8px] border border-line">
+          <div className="flex items-center gap-3 px-4 py-4">
+            <Avatar user={user} size={40} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[14px] font-medium">{user.name}</div>
+              <div className="truncate text-[13px] text-muted">
+                {[user.email, user.phone].filter(Boolean).join(" · ") || "No contact details"}
+              </div>
+            </div>
+            <button type="button" onClick={() => clerk.openUserProfile()} className={`${btnSecondary} shrink-0`}>
+              Manage account
+            </button>
           </div>
-          <div className="flex items-center justify-between gap-4 px-4 py-3">
-            <dt className="text-[13px] text-muted">Email</dt>
-            <dd className="min-w-0 truncate text-[13.5px]">{user.email}</dd>
-          </div>
-        </dl>
+        </div>
       </section>
 
       <section className="mt-10 grid gap-6 border-t border-line pt-8 md:grid-cols-[240px_minmax(0,1fr)] md:gap-12">

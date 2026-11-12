@@ -1,8 +1,10 @@
 "use client";
 
+import { useClerk } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { api, errMsg } from "./api";
+import { errMsg } from "./api";
+import { Avatar, contactOf } from "./Avatar";
 import { Logo } from "./Logo";
 import { Menu } from "./Menu";
 import { useToast } from "./Toast";
@@ -17,18 +19,16 @@ export function AppNav({ user }: { user: PublicUser }) {
   const pathname = usePathname();
   const router = useRouter();
   const toast = useToast();
+  const clerk = useClerk();
+  const contact = contactOf(user);
 
-  const logout = async () => {
+  const signOut = async () => {
     try {
-      await api("/api/auth/logout", { method: "POST" });
-      router.push("/login");
-      router.refresh();
+      await clerk.signOut({ redirectUrl: "/" });
     } catch (e) {
-      toast(`Couldn't log out: ${errMsg(e)}`);
+      toast(`Couldn't sign out: ${errMsg(e)}`);
     }
   };
-
-  const initial = (user.name || user.email).trim().charAt(0).toUpperCase();
 
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-bg/90 backdrop-blur-sm">
@@ -54,17 +54,18 @@ export function AppNav({ user }: { user: PublicUser }) {
         <div className="ml-auto">
           <Menu
             ariaLabel="Account menu"
-            triggerClassName="grid size-7 place-items-center rounded-full border border-line bg-surface text-[12px] font-medium text-fg transition-colors hover:border-fg/30"
-            trigger={initial}
+            triggerClassName="rounded-full transition-opacity hover:opacity-80"
+            trigger={<Avatar user={user} />}
             header={
               <div className="min-w-0">
                 <div className="truncate text-[13px] font-medium">{user.name}</div>
-                <div className="truncate text-[12px] text-muted">{user.email}</div>
+                {contact && <div className="truncate text-[12px] text-muted">{contact}</div>}
               </div>
             }
             items={[
               { key: "settings", label: "Settings", onSelect: () => router.push("/settings") },
-              { key: "logout", label: "Log out", onSelect: logout },
+              { key: "account", label: "Manage account", onSelect: () => clerk.openUserProfile() },
+              { key: "signout", label: "Sign out", onSelect: signOut },
             ]}
           />
         </div>

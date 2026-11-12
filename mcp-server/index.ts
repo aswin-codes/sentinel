@@ -49,6 +49,8 @@ async function main() {
     process.exit(1);
   }
   const userId = user.id;
+  const contact = user.email ?? user.phone;
+  const userLabel = contact ? `${user.name} <${contact}>` : user.name;
 
   type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
   const ok = (data: unknown): ToolResult => ({
@@ -82,7 +84,7 @@ async function main() {
     { name: "qa-hub", version: "0.2.0" },
     {
       instructions:
-        `QA Hub stores manual QA test plans for software projects. You are signed in as ${user.name} <${user.email}>; ` +
+        `QA Hub stores manual QA test plans for software projects. You are signed in as ${userLabel}; ` +
         "every tool only sees this user's projects and plans. Typical workflow: " +
         "list_projects (match repoPath to your current working directory) → if no project matches, create_project " +
         "(pass your current working directory as repoPath) → inspect_repo_changes (see what changed) → " +
@@ -351,7 +353,7 @@ async function main() {
   process.stdin.on("close", () => void shutdown("stdin closed"));
 
   await server.connect(new StdioServerTransport());
-  log(`ready as ${user.email} (env:${fs.existsSync(envPath) ? envPath : "no .env found, using defaults"})`);
+  log(`ready as ${userLabel} (env:${fs.existsSync(envPath) ? envPath : "no .env found, using defaults"})`);
 }
 
 main().catch((e) => {

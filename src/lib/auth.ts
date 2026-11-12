@@ -1,101 +1,84 @@
 /**
  * Framework-agnostic auth core (used by Next route handlers AND the MCP server).
- * Relative imports only. Next-specific cookie helpers live in ./session.ts.
+ * Relative imports only. Identity/sessions are handled by Clerk; Clerk-specific helpers live in ./session.ts.
+ * Here: the local `users` row (owner of projects), personal API tokens and ownership guards.
  */
-import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
-import { and, desc, eq, gt } from "drizzle-orm";
-import { z } from "zod";
+import { createHash, randomBytes } from "node:crypto";
+import { and, desc, eq, like } from "drizzle-orm";
 import { db } from "../db";
-import { apiTokens, projects, sessions, testPlans, testRuns, users } from "../db/schema";
+import { apiTokens, projects, testPlans, testRuns, users } from "../db/schema";
 import { NotFoundError } from "./plans";
 
-const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
-
-export const SESSION_COOKIE = "qahub_session";
-export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 export const API_TOKEN_PREFIX = "qah_";
 
-export type PublicUser = { id: number; email: string; name: string };
-
-export const signupSchema = z.object({
-  name: z.string().trim().min(1, "Enter your name.").max(80),
-  email: z.string().trim().toLowerCase().email("Enter a valid email."),
-  password: z.string().min(8, "Use at least 8 characters.").max(200),
-});
-export const loginSchema = z.object({
-  email: z.string().trim().toLowerCase().email("Enter a valid email."),
-  password: z.string().min(1, "Enter your password."),
-});
+export type PublicUser = {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  avatarUrl: string | null;
+};
 
 export class UnauthorizedError extends Error {}
 export class ConflictError extends Error {}
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
-const toPublic = (u: { id: number; email: string; name: string }): PublicUser => ({
+
+const publicCols = {
+  id: users.id,
+  name: users.name,
+  email: users.email,
+  phone: users.phone,
+  avatarUrl: users.avatarUrl,
+};
+const toPublic = (u: PublicUser): PublicUser => ({
   id: u.id,
-  email: u.email,
   name: u.name,
+  email: u.email,
+  phone: u.phone,
+  avatarUrl: u.avatarUrl,
 });
 
-// ---------- Passwords (scrypt, no native deps) ----------
+// ---------- Users (mirrored from Clerk) ----------
 
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16);
-  const key = await scrypt(password, salt, 64);
-  return `scrypt$${salt.toString("hex")}$${key.toString("hex")}`;
-}
+export type ClerkUserInput = {
+  clerkUserId: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  avatarUrl?: string | null;
+};
 
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [algo, saltHex, keyHex] = stored.split("$");
-  if (algo !== "scrypt" || !saltHex || !keyHex) return false;
-  const key = await scrypt(password, Buffer.from(saltHex, "hex"), 64);
-  const expected = Buffer.from(keyHex, "hex");
-  return expected.length === key.length && timingSafeEqual(expected, key);
-}
-
-// ---------- Users ----------
-
-export async function createUser(input: z.input<typeof signupSchema>): Promise<PublicUser> {
-  const { name, email, password } = signupSchema.parse(input);
-  const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
-  if (existing) throw new ConflictError("An account with this email already exists.");
+/** Insert or update the local user for a Clerk user id. */
+export async function upsertClerkUser(input: ClerkUserInput): Promise<PublicUser> {
+  const values = {
+    name: input.name.trim(),
+    email: input.email ?? null,
+    phone: input.phone ?? null,
+    avatarUrl: input.avatarUrl ?? null,
+  };
+  // One-time migration: accounts created by the old email/password auth were
+  // re-keyed to `legacy:<id>`. The first Clerk sign-in with the same (Clerk-verified)
+  // email claims that row, so its projects, plans and tokens carry over.
+  if (values.email && !(await getUserByClerkId(input.clerkUserId))) {
+    const [claimed] = await db
+      .update(users)
+      .set({ clerkUserId: input.clerkUserId, ...values })
+      .where(and(eq(users.email, values.email), like(users.clerkUserId, "legacy:%")))
+      .returning(publicCols);
+    if (claimed) return toPublic(claimed);
+  }
   const [u] = await db
     .insert(users)
-    .values({ name, email, passwordHash: await hashPassword(password) })
-    .returning();
+    .values({ clerkUserId: input.clerkUserId, ...values })
+    .onConflictDoUpdate({ target: users.clerkUserId, set: values })
+    .returning(publicCols);
   return toPublic(u);
 }
 
-export async function authenticate(input: z.input<typeof loginSchema>): Promise<PublicUser> {
-  const { email, password } = loginSchema.parse(input);
-  const [u] = await db.select().from(users).where(eq(users.email, email));
-  if (!u || !(await verifyPassword(password, u.passwordHash)))
-    throw new UnauthorizedError("Incorrect email or password.");
-  return toPublic(u);
-}
-
-// ---------- Sessions ----------
-
-export async function createSession(userId: number): Promise<{ token: string; expiresAt: Date }> {
-  const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
-  await db.insert(sessions).values({ id: sha256(token), userId, expiresAt });
-  return { token, expiresAt };
-}
-
-export async function getUserBySessionToken(token: string | undefined | null): Promise<PublicUser | null> {
-  if (!token) return null;
-  const [row] = await db
-    .select({ id: users.id, email: users.email, name: users.name })
-    .from(sessions)
-    .innerJoin(users, eq(users.id, sessions.userId))
-    .where(and(eq(sessions.id, sha256(token)), gt(sessions.expiresAt, new Date())));
-  return row ?? null;
-}
-
-export async function deleteSession(token: string | undefined | null): Promise<void> {
-  if (token) await db.delete(sessions).where(eq(sessions.id, sha256(token)));
+export async function getUserByClerkId(clerkUserId: string): Promise<PublicUser | null> {
+  const [u] = await db.select(publicCols).from(users).where(eq(users.clerkUserId, clerkUserId));
+  return u ? toPublic(u) : null;
 }
 
 // ---------- API tokens ----------
@@ -136,7 +119,7 @@ export async function revokeApiToken(userId: number, tokenId: number): Promise<v
 export async function getUserByApiToken(token: string | undefined | null): Promise<PublicUser | null> {
   if (!token || !token.startsWith(API_TOKEN_PREFIX)) return null;
   const [row] = await db
-    .select({ tokenId: apiTokens.id, id: users.id, email: users.email, name: users.name })
+    .select({ tokenId: apiTokens.id, ...publicCols })
     .from(apiTokens)
     .innerJoin(users, eq(users.id, apiTokens.userId))
     .where(eq(apiTokens.tokenHash, sha256(token)));

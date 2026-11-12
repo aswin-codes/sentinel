@@ -14,27 +14,16 @@ export type Tag = { label: string; color: string };
 export type ResultStatus = "not_run" | "pass" | "fail";
 export type PlanStatus = "draft" | "active" | "archived";
 
+/** Local owner of projects. Identity + sessions live in Clerk; synced lazily on first request. */
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
-  email: text("email").notNull().unique(),
-  name: text("name").notNull(),
-  passwordHash: text("password_hash").notNull(),
+  clerkUserId: text("clerk_user_id").notNull().unique(),
+  name: text("name").default("").notNull(),
+  email: text("email"),
+  phone: text("phone"),
+  avatarUrl: text("avatar_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
-
-/** Browser sessions. `id` is sha256(token); the raw token lives only in the cookie. */
-export const sessions = pgTable(
-  "sessions",
-  {
-    id: text("id").primaryKey(),
-    userId: integer("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => [index("sessions_user_idx").on(t.userId)],
-);
 
 /** Personal API tokens for MCP / REST agents. Only sha256(token) is stored. */
 export const apiTokens = pgTable(
@@ -151,7 +140,6 @@ export const testResults = pgTable(
 
 export const usersRelations = relations(users, ({ many }) => ({
   projects: many(projects),
-  sessions: many(sessions),
   apiTokens: many(apiTokens),
 }));
 export const projectsRelations = relations(projects, ({ one, many }) => ({

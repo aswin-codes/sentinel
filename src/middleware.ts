@@ -1,22 +1,25 @@
-import { NextResponse, type NextRequest } from "next/server";
-
-// Keep in sync with SESSION_COOKIE in src/lib/auth.ts (not imported: middleware runs on the edge runtime).
-const SESSION_COOKIE = "qahub_session";
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
 /**
- * Cheap cookie-presence gate for app pages. The real session check happens server-side
- * (requireUser in the (app) layout). /login and /signup decide for themselves since the
- * cookie may be stale.
+ * Clerk runs on every page and API route so `auth()` works server-side.
+ * Only app pages are protected here (signed out → Clerk sign-in). API routes are NOT protected by
+ * middleware: they also accept `Authorization: Bearer qah_...` and do their own check (requireRequestUser).
  */
-export function middleware(req: NextRequest) {
-  if (req.cookies.get(SESSION_COOKIE)?.value) return NextResponse.next();
-  const { pathname, search } = req.nextUrl;
-  const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  url.search = `?next=${encodeURIComponent(pathname + search)}`;
-  return NextResponse.redirect(url);
-}
+const isProtectedPage = createRouteMatcher(["/projects(.*)", "/settings(.*)"]);
+
+export default clerkMiddleware(
+  async (auth, req) => {
+    if (isProtectedPage(req)) await auth.protect();
+  },
+  // Our own sign-in/up pages (instead of Clerk's hosted Account Portal); env vars not required.
+  { signInUrl: "/sign-in", signUpUrl: "/sign-up" },
+);
 
 export const config = {
-  matcher: ["/projects", "/projects/:path*", "/settings", "/settings/:path*"],
+  matcher: [
+    // Skip Next.js internals and static files, unless found in search params
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    // Always run for API routes
+    "/(api|trpc)(.*)",
+  ],
 };

@@ -10,24 +10,28 @@ no demo/seed data anywhere.
 - **PostgreSQL** (`qahub` db) via `drizzle-orm/node-postgres` + `pg`
 - `DATABASE_URL` in `.env` (gitignored). Next loads it; the MCP server loads it with `process.loadEnvFile`.
 - Zod v4 for all validation. `@modelcontextprotocol/sdk` for the MCP server (run with `tsx`).
-- Auth: own implementation — scrypt password hashes, DB-backed sessions (httpOnly cookie `qahub_session`, sha256 stored), personal API tokens `qah_...` (sha256 stored, shown once).
+- Auth (humans): **Clerk** (`@clerk/nextjs` v7). Sign-in methods = Google + phone (SMS) only, configured in the
+  Clerk dashboard (not in code). Keys `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` in `.env`/`.env.local` (required in v7;
+  for dev, `npx clerk@latest init` writes temporary keyless keys). Local `users` row (keyed by `clerk_user_id`) is created lazily on first request — no webhooks.
+- Auth (agents): personal API tokens `qah_...` (sha256 stored, shown once) — never Clerk.
 
 ## Folder structure
 ```
 src/
   db/schema.ts          Drizzle tables + relations (source of truth)
   db/index.ts           `db` + pg Pool singleton
-  lib/auth.ts           SHARED auth core: signup/login schemas, createUser, authenticate, sessions,
-                        API tokens, assertProjectOwner/assertPlanOwner/assertRunOwner, UnauthorizedError, ConflictError
-  lib/session.ts        Next-only: getCurrentUser, requireUser (pages → redirect /login),
-                        requireRequestUser(req) (route handlers: cookie OR Bearer token), set/clearSessionCookie
+  lib/auth.ts           SHARED auth core (no Clerk imports): PublicUser, upsertClerkUser, getUserByClerkId, API tokens,
+                        assertProjectOwner/assertPlanOwner/assertRunOwner, UnauthorizedError, ConflictError
+  lib/session.ts        Next-only (Clerk): getCurrentUser (auth() → local user, lazy sync), syncCurrentUser,
+                        requireUser (pages → redirect /sign-in), requireRequestUser(req) (Bearer qah_ token OR Clerk session)
   lib/plans.ts          SHARED plan service: zod input schemas, getPlanFull, upsertPlan, listPlans, setResult, ...
   lib/git.ts            SHARED: getGitInfo / getGitDiff (execFile, no shell)
   lib/api.ts            Route-handler helpers (ok/fail/handle/parseId/readJson)
-  middleware.ts         Cookie-presence gate for app pages (real check happens server-side)
+  middleware.ts         clerkMiddleware: protects /projects(.*), /settings(.*); runs on /api (for auth()) but doesn't protect it
   app/
     page.tsx                                  Landing (signed out) / redirect → /projects (signed in)
-    (auth)/login, (auth)/signup               Auth pages
+    (auth)/sign-in/[[...sign-in]], (auth)/sign-up/[[...sign-up]]   Clerk <SignIn/> / <SignUp/> (logo above)
+    login/, signup/                           Legacy URLs → redirect to /sign-in, /sign-up
     (app)/layout.tsx                          Authenticated shell (top nav, user menu) — calls requireUser()
     (app)/projects/page.tsx                   Projects dashboard
     (app)/projects/[projectId]/page.tsx       Project: plans list, repo/git, connect agent, settings
@@ -42,6 +46,7 @@ mcp-server/index.ts     Stdio MCP server; requires QA_HUB_TOKEN env; relative im
 
 ## DB conventions
 - Tables snake_case, TS fields camelCase, `serial` ids. `projects.user_id` → users (cascade).
+- `users`: `clerk_user_id` unique; `email`/`phone`/`avatar_url` nullable (phone-only users have no email). No password/session tables.
 - `steps`/`expected` = `jsonb string[]`; `tags` = `jsonb {label,color}[]`.
 - `test_results` unique on `(run_id, case_id)`. **Missing row = `not_run`.**
 - Plans unique on `(project_id, title)`; sections on `(plan_id, code)`; cases on `(section_id, code)` — upserts preserve case ids and results.
@@ -49,14 +54,11 @@ mcp-server/index.ts     Stdio MCP server; requires QA_HUB_TOKEN env; relative im
 - Schema changes: edit `schema.ts`, then `npm run db:push`.
 
 ## REST API contract
-All JSON. Errors: `{ error: string, details?: unknown }`. Auth: session cookie or `Authorization: Bearer qah_...`.
+All JSON. Errors: `{ error: string, details?: unknown }`. Auth: Clerk session (browser) or `Authorization: Bearer qah_...`.
 Unauthenticated → 401. Not owned / missing → 404. Validation → 400. Duplicate → 409.
 | Method | Path | Body / Query | Returns |
 |---|---|---|---|
-| POST | `/api/auth/signup` | `{name,email,password}` | `{user}` 201 + sets cookie |
-| POST | `/api/auth/login` | `{email,password}` | `{user}` + sets cookie |
-| POST | `/api/auth/logout` | – | `{ok:true}` + clears cookie |
-| GET | `/api/auth/me` | – | `{user}` or 401 |
+| GET | `/api/auth/me` | – | `{user}` `{id,name,email,phone,avatarUrl}` or 401 |
 | GET | `/api/tokens` | – | `ApiTokenInfo[]` `{id,name,prefix,lastUsedAt,createdAt}` |
 | POST | `/api/tokens` | `{name}` | `{id,name,prefix,createdAt,token}` 201 (token shown once) |
 | DELETE | `/api/tokens/[id]` | – | `{ok:true}` |
